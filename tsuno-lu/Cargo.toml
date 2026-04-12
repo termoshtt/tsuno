@@ -1,7 +1,8 @@
 [package]
 name = "tsuno-lu"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
-readme.workspace = true
+repository.workspace = true
 
 [dependencies]
