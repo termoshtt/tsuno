@@ -1,0 +1,7 @@
+[package]
+name = "tsuno-lu"
+version.workspace = true
+edition.workspace = true
+readme.workspace = true
+
+[dependencies]
