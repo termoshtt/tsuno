@@ -6,3 +6,4 @@ edition.workspace = true
 repository.workspace = true
 
 [dependencies]
+katexit = "0.1.5"
