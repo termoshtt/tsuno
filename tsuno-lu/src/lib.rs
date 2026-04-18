@@ -1,3 +1,5 @@
+//! LU decomposition with dynamic update for non-square sparse matrices.
+
 #[katexit::katexit]
 /// Storage for L (lower-triangle) matrix of LU decomposition.
 ///
@@ -8,19 +10,26 @@
 /// M_k = 1 - \mu_k |r_k\rangle \langle c_k|, \quad r_k \neq c_k
 /// $$
 ///
+pub struct L {
+    units: Vec<UnitTriangle>,
+}
+
+#[katexit::katexit]
+/// Unit triangle matrix in the product representation of [L].
+///
+/// $$
+/// M = 1 - \mu |r\rangle \langle c|, \quad r \neq c
+/// $$
+///
 /// Invariant
 /// ---------
 /// - $\mu_k \neq 0$
 /// - $r_k \neq c_k$
-/// - Length of `mu`, `col`, and `row` are the same.
 ///
-pub struct L {
-    /// Multipliers $\mu_k$
-    mu: Vec<f64>,
-    /// Column $c_k$
-    col: Vec<usize>,
-    /// Row $r_k$
-    row: Vec<usize>,
+struct UnitTriangle {
+    mu: f64,
+    col: usize,
+    row: usize,
 }
 
 #[katexit::katexit]
