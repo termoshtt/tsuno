@@ -27,7 +27,11 @@ pub struct LU {
 
 impl LU {
     /// Initial factorization from a COO matrix
-    pub fn initial_factorize(coo: impl Iterator<Item = (usize, usize, f64)>) -> Self {
-        todo!()
+    pub fn initial_factorize(
+        nrows: usize,
+        ncols: usize,
+        coo: impl Iterator<Item = (usize, usize, f64)>,
+    ) -> Self {
+        Worker::from_coo_matrix(nrows, ncols, coo).factorize()
     }
 }
