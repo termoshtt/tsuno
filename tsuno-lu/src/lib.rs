@@ -1,10 +1,12 @@
 //! LU decomposition with dynamic update for non-square sparse matrices.
 
+mod initial_factorize;
 mod lower;
 mod upper;
 
-pub use lower::L;
-pub use upper::U;
+pub use initial_factorize::*;
+pub use lower::*;
+pub use upper::*;
 
 #[katexit::katexit]
 /// Storage for a LU-decomposed matrix
