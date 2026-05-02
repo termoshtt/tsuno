@@ -56,6 +56,7 @@ mod tests {
     use ndarray::array;
 
     use crate::LU;
+    use crate::test_support::{diagonally_dominant_matrix, vector};
 
     #[test]
     fn solve_transposed_solves_dense_rhs() {
@@ -79,6 +80,20 @@ mod tests {
         let solution = lu.solve_transposed(&rhs);
 
         assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+    }
+
+    #[test]
+    fn solve_transposed_handles_generated_matrices_with_different_sparsity() {
+        for (case, density) in [0.0, 0.1, 0.35, 0.7, 1.0].into_iter().enumerate() {
+            let matrix = diagonally_dominant_matrix(8, density, 300 + case as u64);
+            let expected_solution = vector(8, 400 + case as u64);
+            let rhs = matrix.t().dot(&expected_solution);
+            let lu = LU::from_dense(matrix);
+
+            let solution = lu.solve_transposed(&rhs);
+
+            assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+        }
     }
 
     #[test]
