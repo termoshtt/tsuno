@@ -167,28 +167,30 @@ impl Worker {
         best.map(|(_, row, col)| (row, col))
     }
 
-    /// Perform the unit factorization step for the current `step`.
+    /// Eliminate the active column `j` with pivot row `i`.
     ///
-    /// Factorize current matrix
-    ///
-    /// ```text
-    /// i | a v  -- a is the pivot element, v is the rest of the pivot row
-    /// j | b w
-    /// ```
-    ///
-    /// into
+    /// For the selected pivot `a = A[i, j]`, this step stores the active part
+    /// of row `i` as the next row of `U`. Then, for each other active row `k`
+    /// with a non-zero entry `b = A[k, j]`, it applies
     ///
     /// ```text
-    /// i | a v  
-    /// j | 0 w - μ v -- where μ = b / a
+    /// μ = b / a
+    /// row_k <- row_k - μ row_i
     /// ```
     ///
-    /// or
+    /// so that column `j` is eliminated from row `k`.
     ///
     /// ```text
-    /// i | a v - μ w -- where μ = a / b
-    /// j | 0 w
+    ///        j
+    /// i | ... a ... v ...
+    /// k | ... b ... w ...
+    ///
+    ///        j
+    /// i | ... a ... v ...
+    /// k | ... 0 ... w - μ v ...
     /// ```
+    ///
+    /// Each non-zero `μ` is recorded as a unit triangle factor in `L`.
     ///
     fn unit_factorize(&mut self, i: usize, j: usize) {
         debug_assert!(self.active_rows[i]);
@@ -311,6 +313,21 @@ mod tests {
             [1.0, 0.0, 0.0, 2.0],
             [0.0, 3.0, 0.0, 0.0],
             [4.0, 0.0, 5.0, 0.0],
+        ];
+        let lu = Worker::from_dense(matrix.clone()).factorize();
+
+        let reconstructed = lu.reconstruct();
+
+        assert_abs_diff_eq!(reconstructed, matrix, epsilon = 1.0e-9);
+    }
+
+    #[test]
+    fn factorize_reconstructs_tall_matrix() {
+        let matrix = array![
+            [1.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [3.0, 0.0, 4.0],
+            [0.0, 5.0, 6.0],
         ];
         let lu = Worker::from_dense(matrix.clone()).factorize();
 
