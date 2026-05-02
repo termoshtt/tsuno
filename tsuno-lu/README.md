@@ -19,9 +19,10 @@ Fortran-style abbreviations.
 - [x] Solve a linear system with the represented matrix.
   - Name: `solve(&Array1<f64>) -> Array1<f64>`, for `A x = rhs`. In a simplex
     solver, this is used with the current basis matrix `B`.
-- [ ] Solve a transposed linear system with the represented matrix.
-  - Proposed name: `solve_transposed`, for `A^T x = rhs`. In a simplex solver,
-    this is used with the current basis matrix `B`.
+- [x] Solve a transposed linear system with the represented matrix.
+  - Name: `solve_transposed(&Array1<f64>) -> Array1<f64>`, for
+    `A^T x = rhs`. In a simplex solver, this is used with the current basis
+    matrix `B`.
 - [ ] Add a product-form basis column replacement.
   - Proposed name: `replace_basis_column`, storing the eta column
     `B^{-1} a_q` and the leaving basis position.
