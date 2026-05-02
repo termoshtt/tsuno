@@ -16,7 +16,7 @@ Fortran-style abbreviations.
 - [x] Store the nominal upper factor as sparse pivot rows.
 - [x] Reconstruct the original matrix from the current initial factorization for
   validation.
-- [ ] Solve a linear system with the represented basis matrix.
+- [x] Solve a linear system with the represented basis matrix.
   - Proposed name: `solve_basis_system`, for `B x = rhs`.
 - [ ] Solve a transposed linear system with the represented basis matrix.
   - Proposed name: `solve_transposed_basis_system`, for `B^T x = rhs`.
