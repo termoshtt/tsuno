@@ -13,6 +13,7 @@ use std::fmt;
 /// Note that $r_k$ and $c_k$ are just not equal, but they can be in any order.
 /// This means that $L$ is not necessarily lower-triangular.
 ///
+#[derive(Debug)]
 pub struct L {
     units: Vec<UnitTriangle>,
 }
@@ -55,6 +56,7 @@ impl fmt::Display for L {
 /// - $\mu \neq 0$
 /// - $r \neq c$
 ///
+#[derive(Debug)]
 pub(crate) struct UnitTriangle {
     mu: f64,
     col: usize,

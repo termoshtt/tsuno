@@ -7,6 +7,7 @@
 /// ----------
 /// - The first non-zero entry in each row is the pivot, and the pivot is non-zero.
 ///
+#[derive(Debug)]
 pub struct U {
     arena: Vec<NonZeroEntry>,
     rows: Vec<RowPtr>,
@@ -47,6 +48,7 @@ impl U {
 ///
 /// Since [U] allows non-zero entries to be non-contiguous, we need to store the offset and length of each row in the arena.
 ///
+#[derive(Debug)]
 struct RowPtr {
     /// Offset of the first non-zero entry in the arena for the row.
     offset: usize,
@@ -55,6 +57,7 @@ struct RowPtr {
 }
 
 /// Non-zero entry in with its column index in [U].
+#[derive(Debug)]
 struct NonZeroEntry {
     value: f64,
     col: usize,
