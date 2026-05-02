@@ -119,10 +119,7 @@ impl LU {
 }
 
 fn assert_basis_solve_ready(lu: &LU) {
-    assert_eq!(
-        lu.nrows, lu.ncols,
-        "basis solves require a square matrix"
-    );
+    assert_eq!(lu.nrows, lu.ncols, "basis solves require a square matrix");
     assert_eq!(
         lu.p.len(),
         lu.nrows,
