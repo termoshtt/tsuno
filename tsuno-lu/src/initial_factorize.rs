@@ -53,7 +53,7 @@ impl Worker {
         let (nrows, ncols) = array.dim();
         let coo = array
             .indexed_iter()
-            .filter(|&(_, &value)| value != 0.0)
+            .filter(|&(_, &value)| value.abs() > DROP_TOLERANCE)
             .map(|((row, col), &value)| (row, col, value))
             .collect::<Vec<_>>();
         Self::from_coo_matrix(nrows, ncols, coo.into_iter())
@@ -318,6 +318,23 @@ mod tests {
         assert_eq!(
             worker.work_cols[3].iter().collect::<Vec<_>>(),
             vec![(&1, &10.0)]
+        );
+    }
+
+    #[test]
+    fn from_dense_drops_small_entries() {
+        let matrix = array![[DROP_TOLERANCE / 2.0, 1.0]];
+
+        let worker = Worker::from_dense(matrix);
+
+        assert_eq!(
+            worker.work_rows[0].iter().collect::<Vec<_>>(),
+            vec![(&1, &1.0)]
+        );
+        assert!(worker.work_cols[0].is_empty());
+        assert_eq!(
+            worker.work_cols[1].iter().collect::<Vec<_>>(),
+            vec![(&0, &1.0)]
         );
     }
 
