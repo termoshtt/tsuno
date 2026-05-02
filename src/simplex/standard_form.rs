@@ -13,8 +13,51 @@ use super::{Basis, BasisError};
 /// A x = b,\quad x \ge 0.
 /// $$
 ///
+/// Here
+///
+/// $$
+/// A \in \mathbb{R}^{m \times n},\quad
+/// b \in \mathbb{R}^m,\quad
+/// c \in \mathbb{R}^n,\quad
+/// m \le n.
+/// $$
+///
 /// The initial implementation assumes callers provide a feasible initial
-/// [`Basis`]. Phase I is intentionally outside this type for now.
+/// [`Basis`]. Phase I, which would construct such a basis automatically, is
+/// intentionally outside this type for now.
+///
+/// Given a basis index set
+///
+/// $$
+/// I = \{j_0, j_1, \ldots, j_{m-1}\},
+/// $$
+///
+/// this type provides the problem-side data needed by the revised simplex
+/// method. The basis cost vector is
+///
+/// $$
+/// c_I =
+/// \begin{bmatrix}
+/// c_{j_0} & c_{j_1} & \cdots & c_{j_{m-1}}
+/// \end{bmatrix}^T.
+/// $$
+///
+/// The dual variables are computed from the transposed basis system
+///
+/// $$
+/// B^T y = c_I,
+/// \qquad
+/// y = B^{-T} c_I.
+/// $$
+///
+/// Then the reduced cost of column `j` is
+///
+/// $$
+/// r_j = c_j - A_j^T y.
+/// $$
+///
+/// These operations are exposed as [`StandardFormLp::basis_costs`],
+/// [`StandardFormLp::dual_variables`], and [`StandardFormLp::reduced_cost`].
 #[derive(Clone, Debug)]
 pub struct StandardFormLp {
     a: Array2<f64>,
