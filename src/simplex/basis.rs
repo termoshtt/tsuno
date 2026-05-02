@@ -13,6 +13,17 @@ use crate::lu::{LU, UpdateError};
 /// A x = b,\quad x \ge 0,
 /// $$
 ///
+/// This representation assumes that `A` has full row rank and at least as many
+/// columns as rows:
+///
+/// $$
+/// A \in \mathbb{R}^{m \times n},\quad \operatorname{rank}(A)=m,\quad m \le n.
+/// $$
+///
+/// If `m > n`, there are not enough columns to choose an `m`-column square
+/// basis matrix. Such a matrix must be reformulated, reduced by removing
+/// redundant rows, or handled outside this `Basis` representation.
+///
 /// a simplex basis is a set `I` of `m` column indices
 ///
 /// $$
@@ -69,6 +80,7 @@ pub struct Basis {
 #[derive(Clone, Debug, PartialEq)]
 pub enum BasisError {
     EmptyBasis,
+    TooFewColumns { nrows: usize, ncols: usize },
     BasisSizeMismatch { expected: usize, actual: usize },
     ColumnOutOfBounds { column: usize, ncols: usize },
     InvalidReplacementPosition { position: usize, dimension: usize },
@@ -142,6 +154,9 @@ fn validate_basis_indices(matrix: &Array2<f64>, indices: &[usize]) -> Result<(),
     let (nrows, ncols) = matrix.dim();
     if nrows == 0 {
         return Err(BasisError::EmptyBasis);
+    }
+    if nrows > ncols {
+        return Err(BasisError::TooFewColumns { nrows, ncols });
     }
     if indices.len() != nrows {
         return Err(BasisError::BasisSizeMismatch {
@@ -246,6 +261,15 @@ mod tests {
                 actual: 1
             }
         );
+    }
+
+    #[test]
+    fn basis_rejects_more_rows_than_columns() {
+        let matrix = array![[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+
+        let error = Basis::new(&matrix, vec![0, 1, 0]).unwrap_err();
+
+        assert_eq!(error, BasisError::TooFewColumns { nrows: 3, ncols: 2 });
     }
 
     #[test]
