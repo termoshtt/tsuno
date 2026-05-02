@@ -1,6 +1,6 @@
 use ndarray::Array1;
 
-use crate::{LU, assert_solve_ready};
+use super::{LU, assert_solve_ready};
 
 /// Product-form column replacement update.
 ///
@@ -81,7 +81,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::array;
 
-    use crate::LU;
+    use super::super::LU;
 
     #[test]
     fn replace_column_reconstructs_updated_matrix() {

@@ -1,6 +1,6 @@
 use ndarray::Array1;
 
-use crate::{LU, assert_solve_ready};
+use super::{LU, assert_solve_ready};
 
 impl LU {
     /// Solve a transposed linear system with the represented matrix.
@@ -73,8 +73,8 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
-    use crate::LU;
-    use crate::test_support::{diagonally_dominant_matrix, vector};
+    use super::super::LU;
+    use super::super::test_support::{diagonally_dominant_matrix, vector};
 
     #[test]
     fn solve_transposed_solves_dense_rhs() {

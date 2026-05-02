@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::lower::UnitTriangle;
-use crate::*;
+use super::lower::UnitTriangle;
+use super::*;
 use ndarray::Array2;
 
 const DROP_TOLERANCE: f64 = 1.0e-12;
