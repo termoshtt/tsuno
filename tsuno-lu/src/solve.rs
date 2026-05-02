@@ -49,6 +49,8 @@ impl LU {
 mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::array;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     use crate::LU;
     use crate::test_support::{diagonally_dominant_matrix, vector};
@@ -79,9 +81,10 @@ mod tests {
 
     #[test]
     fn solve_handles_generated_matrices_with_different_sparsity() {
-        for (case, density) in [0.0, 0.1, 0.35, 0.7, 1.0].into_iter().enumerate() {
-            let matrix = diagonally_dominant_matrix(8, density, 100 + case as u64);
-            let expected_solution = vector(8, 200 + case as u64);
+        let mut rng = StdRng::seed_from_u64(100);
+        for density in [0.0, 0.1, 0.35, 0.7, 1.0] {
+            let matrix = diagonally_dominant_matrix(8, density, &mut rng);
+            let expected_solution = vector(8, &mut rng);
             let rhs = matrix.dot(&expected_solution);
             let lu = LU::from_dense(matrix);
 

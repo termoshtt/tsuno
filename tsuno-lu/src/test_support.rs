@@ -1,11 +1,13 @@
 use ndarray::{Array1, Array2};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
 
-pub(crate) fn diagonally_dominant_matrix(size: usize, density: f64, seed: u64) -> Array2<f64> {
+pub(crate) fn diagonally_dominant_matrix(
+    size: usize,
+    density: f64,
+    rng: &mut impl Rng,
+) -> Array2<f64> {
     assert!(density >= 0.0 && density <= 1.0);
 
-    let mut rng = StdRng::seed_from_u64(seed);
     let mut matrix = Array2::zeros((size, size));
     for row in 0..size {
         let mut row_sum = 0.0;
@@ -22,7 +24,6 @@ pub(crate) fn diagonally_dominant_matrix(size: usize, density: f64, seed: u64) -
     matrix
 }
 
-pub(crate) fn vector(size: usize, seed: u64) -> Array1<f64> {
-    let mut rng = StdRng::seed_from_u64(seed);
+pub(crate) fn vector(size: usize, rng: &mut impl Rng) -> Array1<f64> {
     Array1::from_iter((0..size).map(|_| rng.gen_range(-1.0..=1.0)))
 }
