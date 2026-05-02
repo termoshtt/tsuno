@@ -17,6 +17,18 @@ pub struct L {
     units: Vec<UnitTriangle>,
 }
 
+impl L {
+    pub(crate) fn from_units(units: impl IntoIterator<Item = UnitTriangle>) -> Self {
+        Self {
+            units: units.into_iter().collect(),
+        }
+    }
+
+    pub fn units(&self) -> impl Iterator<Item = (f64, usize, usize)> + '_ {
+        self.units.iter().map(|unit| (unit.mu, unit.row, unit.col))
+    }
+}
+
 impl fmt::Display for L {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "L = ")?;
@@ -43,10 +55,18 @@ impl fmt::Display for L {
 /// - $\mu \neq 0$
 /// - $r \neq c$
 ///
-struct UnitTriangle {
+pub(crate) struct UnitTriangle {
     mu: f64,
     col: usize,
     row: usize,
+}
+
+impl UnitTriangle {
+    pub(crate) fn new(mu: f64, row: usize, col: usize) -> Self {
+        assert!(mu != 0.0, "unit triangle multiplier must be non-zero");
+        assert_ne!(row, col, "unit triangle row and column must differ");
+        Self { mu, row, col }
+    }
 }
 
 impl fmt::Display for UnitTriangle {

@@ -1,132 +1,29 @@
 //! Initial factorization of a COO matrix into [LU].
 
+use std::collections::BTreeMap;
+
+use crate::lower::UnitTriangle;
 use crate::*;
 
-/// Non-zero structure of the matrix with non-contiguous storage without values.
-///
-/// For matrix:
-///
-/// ```text
-/// A = [[ a     f ],
-///      [ b c d   ],
-///      [     e   ]]
-/// ```
-///
-/// The non-zero structure can be represented with row-major storage:
-///
-/// ```text
-///             ↓ May lack contiguity in storage within rows
-///       a b c - d e f
-/// row | 0 0 1 - 2 2 3
-/// col | 0 1 1 - 1 2 0  <- This part is stored as `index`
-///       |   |   |   ^ Row 3 starts at 6, length = 1
-///       |   |   ^-- Row 2 starts at 4, length = 2
-///       |   ^ Row 1 starts at 2, length = 1
-///       ^-- Row 0 starts at 0, length = 2
-/// ```
-///
-/// This will be stored as follows:
-///
-/// ```text
-/// index = [0 1 1 - 1 2 0]
-/// length = [2 1 2 1]
-/// location = [0 2 4 6]  <- cannot be derived from `length` due to non-contiguity
-/// ```
-///
-/// This is same for column-major storage, but with rows and columns swapped.
-///
-/// Invariant
-/// ----------
-/// - `length.len() == location.len() > 0`
-/// - `location` is sorted in ascending order, and `location[0] == 0`
-///
-struct NonZeroStructure {
-    index: Vec<usize>,
-    length: Vec<usize>,
-    location: Vec<usize>,
-}
-
-impl NonZeroStructure {
-    /// Create a row-major non-zero structure from a contiguous list of (row, column, value) entries sorted by row.
-    fn row_major(nrows: usize, row_sorted: &[(usize, usize, f64)]) -> Self {
-        assert!(nrows > 0, "number of rows must be positive");
-
-        let mut index = Vec::new();
-        let mut length = Vec::with_capacity(nrows);
-        let mut location = Vec::with_capacity(nrows);
-
-        let mut entries = row_sorted.iter().peekable();
-        for row in 0..nrows {
-            location.push(index.len());
-            while let Some(&(entry_row, col, _)) = entries.peek() {
-                if *entry_row != row {
-                    break;
-                }
-                index.push(*col);
-                entries.next();
-            }
-            length.push(index.len() - location[row]);
-        }
-        debug_assert!(entries.peek().is_none());
-
-        // Sanity check: the total number of non-zero entries should match the sum of lengths.
-        debug_assert!(index.len() == length.iter().sum::<usize>());
-        // Sanity check: the number of rows/columns should match the length of location.
-        debug_assert!(location.len() == nrows);
-        debug_assert!(length.len() == nrows);
-
-        Self {
-            index,
-            length,
-            location,
-        }
-    }
-
-    /// Create a column-major non-zero structure from a contiguous list of (row, column, value) entries sorted by column.
-    fn col_major(ncols: usize, col_sorted: &[(usize, usize, f64)]) -> Self {
-        assert!(ncols > 0, "number of columns must be positive");
-
-        let mut index = Vec::new();
-        let mut length = Vec::with_capacity(ncols);
-        let mut location = Vec::with_capacity(ncols);
-
-        let mut entries = col_sorted.iter().peekable();
-        for col in 0..ncols {
-            location.push(index.len());
-            while let Some(&(row, entry_col, _)) = entries.peek() {
-                if *entry_col != col {
-                    break;
-                }
-                index.push(*row);
-                entries.next();
-            }
-            length.push(index.len() - location[col]);
-        }
-        debug_assert!(entries.peek().is_none());
-
-        // Sanity check: the total number of non-zero entries should match the sum of lengths.
-        debug_assert!(index.len() == length.iter().sum::<usize>());
-        // Sanity check: the number of rows/columns should match the length of location.
-        debug_assert!(location.len() == ncols);
-        debug_assert!(length.len() == ncols);
-
-        Self {
-            index,
-            length,
-            location,
-        }
-    }
-}
+const DROP_TOLERANCE: f64 = 1.0e-12;
+const PIVOT_THRESHOLD: f64 = 1.0e-12;
 
 /// Workspace for initial factorization of a COO matrix into [LU].
 pub struct Worker {
     /// Current step of the factorization process, $k$ in the paper.
     step: usize,
 
-    /// Non-zero values in column-major order, aligned with `col_major` in [NonZeroStructure].
-    non_zeros: Vec<f64>,
-    col_major: NonZeroStructure,
-    row_major: NonZeroStructure,
+    nrows: usize,
+    ncols: usize,
+
+    rows: Vec<BTreeMap<usize, f64>>,
+    cols: Vec<BTreeMap<usize, f64>>,
+    active_rows: Vec<bool>,
+    active_cols: Vec<bool>,
+    l_units: Vec<UnitTriangle>,
+    u_rows: Vec<Vec<(usize, f64)>>,
+    p: Vec<usize>,
+    q: Vec<usize>,
 }
 
 impl Worker {
@@ -138,7 +35,7 @@ impl Worker {
         assert!(nrows > 0, "number of rows must be positive");
         assert!(ncols > 0, "number of columns must be positive");
 
-        let mut entries = coo.collect::<Vec<_>>();
+        let entries = coo.collect::<Vec<_>>();
         for &(row, col, _) in &entries {
             assert!(
                 row < nrows,
@@ -150,17 +47,113 @@ impl Worker {
             );
         }
 
-        entries.sort_by_key(|&(row, col, _)| (row, col));
-        let row_major = NonZeroStructure::row_major(nrows, &entries);
-        entries.sort_by_key(|&(row, col, _)| (col, row));
-        let col_major = NonZeroStructure::col_major(ncols, &entries);
-        let non_zeros = entries.into_iter().map(|(_, _, value)| value).collect();
+        let mut rows = vec![BTreeMap::new(); nrows];
+        let mut cols = vec![BTreeMap::new(); ncols];
+        for (row, col, value) in entries {
+            let value = rows[row].get(&col).copied().unwrap_or(0.0) + value;
+            if value.abs() <= DROP_TOLERANCE {
+                rows[row].remove(&col);
+                cols[col].remove(&row);
+            } else {
+                rows[row].insert(col, value);
+                cols[col].insert(row, value);
+            }
+        }
+
         Self {
             step: 0,
-            non_zeros,
-            col_major,
-            row_major,
+            nrows,
+            ncols,
+            rows,
+            cols,
+            active_rows: vec![true; nrows],
+            active_cols: vec![true; ncols],
+            l_units: Vec::new(),
+            u_rows: Vec::new(),
+            p: Vec::new(),
+            q: Vec::new(),
         }
+    }
+
+    fn active_row_len(&self, row: usize) -> usize {
+        self.rows[row]
+            .keys()
+            .filter(|&&col| self.active_cols[col])
+            .count()
+    }
+
+    fn active_col_len(&self, col: usize) -> usize {
+        self.cols[col]
+            .keys()
+            .filter(|&&row| self.active_rows[row])
+            .count()
+    }
+
+    fn set_entry(&mut self, row: usize, col: usize, value: f64) {
+        if value.abs() <= DROP_TOLERANCE {
+            self.rows[row].remove(&col);
+            self.cols[col].remove(&row);
+        } else {
+            self.rows[row].insert(col, value);
+            self.cols[col].insert(row, value);
+        }
+    }
+
+    /// Choose the next pivot by Markowitz pivoting.
+    ///
+    /// For an active non-zero `a_ij`, let `r_i` be the number of active
+    /// non-zeros in row `i` and `c_j` be the number of active non-zeros in
+    /// column `j`. Eliminating column `j` with row `i` can combine every
+    /// non-pivot entry in row `i` with every non-pivot entry in column `j`, so
+    /// the number of possible fill-ins is bounded by
+    ///
+    /// ```text
+    /// (r_i - 1) * (c_j - 1).
+    /// ```
+    ///
+    /// Markowitz pivoting minimizes this bound among numerically acceptable
+    /// pivots. The numerical test here accepts `a_ij` only when
+    ///
+    /// ```text
+    /// |a_ij| >= PIVOT_THRESHOLD * max_k |a_kj|
+    /// ```
+    ///
+    /// over active rows in the same column. Ties are broken by larger pivot
+    /// magnitude and then by row/column index for deterministic output.
+    fn choose_pivot(&self) -> Option<(usize, usize)> {
+        let mut best = None;
+        for row in 0..self.nrows {
+            if !self.active_rows[row] {
+                continue;
+            }
+            let row_count = self.active_row_len(row);
+            if row_count == 0 {
+                continue;
+            }
+            for (&col, &value) in &self.rows[row] {
+                if !self.active_cols[col] || value.abs() <= DROP_TOLERANCE {
+                    continue;
+                }
+                let col_max = self.cols[col]
+                    .iter()
+                    .filter(|(candidate_row, _)| self.active_rows[**candidate_row])
+                    .map(|(_, candidate)| candidate.abs())
+                    .fold(0.0, f64::max);
+                if value.abs() < PIVOT_THRESHOLD * col_max {
+                    continue;
+                }
+                let col_count = self.active_col_len(col);
+                let cost = (row_count - 1) * (col_count - 1);
+                let score = (cost, -value.abs(), row, col);
+                if best
+                    .as_ref()
+                    .is_none_or(|(best_score, _, _)| score < *best_score)
+                {
+                    best = Some((score, row, col));
+                }
+            }
+        }
+        best.map(|(_, row, col)| (row, col))
     }
 
     /// Perform the unit factorization step for the current `step`.
@@ -187,11 +180,71 @@ impl Worker {
     /// ```
     ///
     fn unit_factorize(&mut self, i: usize, j: usize) {
-        todo!()
+        debug_assert!(self.active_rows[i]);
+        debug_assert!(self.active_cols[j]);
+
+        let pivot = *self.rows[i]
+            .get(&j)
+            .expect("pivot must exist in the active matrix");
+        assert!(pivot.abs() > DROP_TOLERANCE, "pivot must be non-zero");
+
+        let pivot_row = self.rows[i]
+            .iter()
+            .filter(|(col, value)| self.active_cols[**col] && value.abs() > DROP_TOLERANCE)
+            .map(|(&col, &value)| (col, value))
+            .collect::<Vec<_>>();
+
+        let mut u_row = Vec::with_capacity(pivot_row.len());
+        u_row.push((j, pivot));
+        u_row.extend(pivot_row.iter().copied().filter(|&(col, _)| col != j));
+
+        let target_rows = self.cols[j]
+            .iter()
+            .filter(|(row, _)| self.active_rows[**row] && **row != i)
+            .map(|(&row, &value)| (row, value))
+            .collect::<Vec<_>>();
+
+        for (row, value) in target_rows {
+            let mu = value / pivot;
+            if mu.abs() > DROP_TOLERANCE {
+                self.l_units.push(UnitTriangle::new(mu, row, i));
+            }
+
+            for &(col, pivot_value) in &pivot_row {
+                if col == j {
+                    continue;
+                }
+                let value = self.rows[row].get(&col).copied().unwrap_or(0.0) - mu * pivot_value;
+                self.set_entry(row, col, value);
+            }
+            self.set_entry(row, j, 0.0);
+        }
+
+        for &(col, _) in &pivot_row {
+            self.cols[col].remove(&i);
+        }
+        self.rows[i].clear();
+        self.active_rows[i] = false;
+        self.active_cols[j] = false;
+        self.u_rows.push(u_row);
+        self.p.push(i);
+        self.q.push(j);
+        self.step += 1;
     }
 
-    pub fn factorize(self) -> LU {
-        todo!()
+    pub fn factorize(mut self) -> LU {
+        while self.step < self.nrows.min(self.ncols) {
+            let Some((row, col)) = self.choose_pivot() else {
+                break;
+            };
+            self.unit_factorize(row, col);
+        }
+        LU {
+            l: L::from_units(self.l_units),
+            u: U::from_rows(self.u_rows),
+            p: self.p,
+            q: self.q,
+        }
     }
 }
 
@@ -200,86 +253,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn row_major_builds_index_length_and_location() {
-        let row_sorted = vec![
-            (0, 0, 1.0),
-            (0, 1, 2.0),
-            (1, 1, 3.0),
-            (2, 1, 4.0),
-            (2, 2, 5.0),
-            (3, 0, 6.0),
-        ];
-
-        let structure = NonZeroStructure::row_major(4, &row_sorted);
-
-        assert_eq!(structure.index, vec![0, 1, 1, 1, 2, 0]);
-        assert_eq!(structure.length, vec![2, 1, 2, 1]);
-        assert_eq!(structure.location, vec![0, 2, 3, 5]);
-    }
-
-    #[test]
-    #[should_panic(expected = "number of rows must be positive")]
-    fn row_major_rejects_zero_rows() {
-        NonZeroStructure::row_major(0, &Vec::new());
-    }
-
-    #[test]
-    fn row_major_represents_empty_rows() {
-        let row_sorted = vec![(1, 2, 1.0), (3, 0, 2.0)];
-
-        let structure = NonZeroStructure::row_major(5, &row_sorted);
-
-        assert_eq!(structure.index, vec![2, 0]);
-        assert_eq!(structure.length, vec![0, 1, 0, 1, 0]);
-        assert_eq!(structure.location, vec![0, 0, 1, 1, 2]);
-    }
-
-    #[test]
-    fn col_major_builds_index_length_and_location() {
-        let col_sorted = vec![
-            (0, 0, 1.0),
-            (3, 0, 6.0),
-            (0, 1, 2.0),
-            (1, 1, 3.0),
-            (2, 1, 4.0),
-            (2, 2, 5.0),
-        ];
-
-        let structure = NonZeroStructure::col_major(3, &col_sorted);
-
-        assert_eq!(structure.index, vec![0, 3, 0, 1, 2, 2]);
-        assert_eq!(structure.length, vec![2, 3, 1]);
-        assert_eq!(structure.location, vec![0, 2, 5]);
-    }
-
-    #[test]
-    #[should_panic(expected = "number of columns must be positive")]
-    fn col_major_rejects_zero_columns() {
-        NonZeroStructure::col_major(0, &Vec::new());
-    }
-
-    #[test]
-    fn col_major_represents_empty_columns() {
-        let col_sorted = vec![(1, 1, 1.0), (0, 3, 2.0)];
-
-        let structure = NonZeroStructure::col_major(5, &col_sorted);
-
-        assert_eq!(structure.index, vec![1, 0]);
-        assert_eq!(structure.length, vec![0, 1, 0, 1, 0]);
-        assert_eq!(structure.location, vec![0, 0, 1, 1, 2]);
-    }
-
-    #[test]
-    fn from_coo_matrix_builds_structures_with_empty_rows_and_columns() {
+    fn from_coo_matrix_builds_workspace_with_empty_rows_and_columns() {
         let worker = Worker::from_coo_matrix(4, 5, vec![(1, 3, 10.0), (3, 1, 20.0)].into_iter());
 
-        assert_eq!(worker.row_major.index, vec![3, 1]);
-        assert_eq!(worker.row_major.length, vec![0, 1, 0, 1]);
-        assert_eq!(worker.row_major.location, vec![0, 0, 1, 1]);
-        assert_eq!(worker.col_major.index, vec![3, 1]);
-        assert_eq!(worker.col_major.length, vec![0, 1, 0, 1, 0]);
-        assert_eq!(worker.col_major.location, vec![0, 0, 1, 1, 2]);
-        assert_eq!(worker.non_zeros, vec![20.0, 10.0]);
+        assert!(worker.rows[0].is_empty());
+        assert_eq!(worker.rows[1].iter().collect::<Vec<_>>(), vec![(&3, &10.0)]);
+        assert!(worker.rows[2].is_empty());
+        assert_eq!(worker.rows[3].iter().collect::<Vec<_>>(), vec![(&1, &20.0)]);
+        assert_eq!(worker.cols[1].iter().collect::<Vec<_>>(), vec![(&3, &20.0)]);
+        assert_eq!(worker.cols[3].iter().collect::<Vec<_>>(), vec![(&1, &10.0)]);
     }
 
     #[test]
@@ -292,5 +274,108 @@ mod tests {
     #[should_panic(expected = "number of columns must be positive")]
     fn from_coo_matrix_rejects_zero_columns() {
         Worker::from_coo_matrix(1, 0, Vec::new().into_iter());
+    }
+
+    #[test]
+    fn choose_pivot_prefers_minimum_markowitz_cost() {
+        let worker = Worker::from_coo_matrix(
+            3,
+            3,
+            vec![
+                (0, 0, 1.0),
+                (0, 1, 1.0),
+                (0, 2, 1.0),
+                (1, 0, 1.0),
+                (2, 1, 1.0),
+                (2, 2, 1.0),
+            ]
+            .into_iter(),
+        );
+
+        assert_eq!(worker.choose_pivot(), Some((1, 0)));
+    }
+
+    fn reconstruct(lu: &LU, nrows: usize, ncols: usize) -> Vec<Vec<f64>> {
+        let mut matrix = vec![vec![0.0; ncols]; nrows];
+        for (step, row) in lu.u().rows().enumerate() {
+            for (col, value) in row {
+                matrix[lu.row_permutation()[step]][col] = value;
+            }
+        }
+        for (mu, row, col) in lu.l().units().collect::<Vec<_>>().into_iter().rev() {
+            let pivot_row = matrix[col].clone();
+            for (entry, pivot_entry) in matrix[row].iter_mut().zip(pivot_row) {
+                *entry += mu * pivot_entry;
+            }
+        }
+        matrix
+    }
+
+    fn assert_matrix_approx_eq(actual: &[Vec<f64>], expected: &[Vec<f64>]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual_row, expected_row) in actual.iter().zip(expected) {
+            assert_eq!(actual_row.len(), expected_row.len());
+            for (&actual, &expected) in actual_row.iter().zip(expected_row) {
+                assert!(
+                    (actual - expected).abs() < 1.0e-9,
+                    "expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn factorize_reconstructs_square_matrix() {
+        let lu = LU::initial_factorize(
+            3,
+            3,
+            vec![
+                (0, 0, 2.0),
+                (0, 2, 1.0),
+                (1, 0, 4.0),
+                (1, 1, 3.0),
+                (2, 1, 5.0),
+                (2, 2, 6.0),
+            ]
+            .into_iter(),
+        );
+
+        let reconstructed = reconstruct(&lu, 3, 3);
+
+        assert_matrix_approx_eq(
+            &reconstructed,
+            &[
+                vec![2.0, 0.0, 1.0],
+                vec![4.0, 3.0, 0.0],
+                vec![0.0, 5.0, 6.0],
+            ],
+        );
+    }
+
+    #[test]
+    fn factorize_reconstructs_rectangular_matrix() {
+        let lu = LU::initial_factorize(
+            3,
+            4,
+            vec![
+                (0, 0, 1.0),
+                (0, 3, 2.0),
+                (1, 1, 3.0),
+                (2, 0, 4.0),
+                (2, 2, 5.0),
+            ]
+            .into_iter(),
+        );
+
+        let reconstructed = reconstruct(&lu, 3, 4);
+
+        assert_matrix_approx_eq(
+            &reconstructed,
+            &[
+                vec![1.0, 0.0, 0.0, 2.0],
+                vec![0.0, 3.0, 0.0, 0.0],
+                vec![4.0, 0.0, 5.0, 0.0],
+            ],
+        );
     }
 }

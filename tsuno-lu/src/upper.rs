@@ -12,6 +12,37 @@ pub struct U {
     rows: Vec<RowPtr>,
 }
 
+impl U {
+    pub(crate) fn from_rows(rows: impl IntoIterator<Item = Vec<(usize, f64)>>) -> Self {
+        let mut arena = Vec::new();
+        let mut row_ptrs = Vec::new();
+        for row in rows {
+            let offset = arena.len();
+            let length = row.len();
+            if let Some((_, pivot)) = row.first() {
+                assert!(*pivot != 0.0, "U row pivot must be non-zero");
+            }
+            arena.extend(
+                row.into_iter()
+                    .map(|(col, value)| NonZeroEntry { value, col }),
+            );
+            row_ptrs.push(RowPtr { offset, length });
+        }
+        Self {
+            arena,
+            rows: row_ptrs,
+        }
+    }
+
+    pub fn rows(&self) -> impl Iterator<Item = impl Iterator<Item = (usize, f64)> + '_> + '_ {
+        self.rows.iter().map(|row| {
+            self.arena[row.offset..row.offset + row.length]
+                .iter()
+                .map(|entry| (entry.col, entry.value))
+        })
+    }
+}
+
 /// Pointer of arena for each row in [U].
 ///
 /// Since [U] allows non-zero entries to be non-contiguous, we need to store the offset and length of each row in the arena.

@@ -34,4 +34,20 @@ impl LU {
     ) -> Self {
         Worker::from_coo_matrix(nrows, ncols, coo).factorize()
     }
+
+    pub fn l(&self) -> &L {
+        &self.l
+    }
+
+    pub fn u(&self) -> &U {
+        &self.u
+    }
+
+    pub fn row_permutation(&self) -> &[usize] {
+        &self.p
+    }
+
+    pub fn col_permutation(&self) -> &[usize] {
+        &self.q
+    }
 }
