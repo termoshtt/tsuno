@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::lower::UnitTriangle;
 use crate::*;
+use ndarray::Array2;
 
 const DROP_TOLERANCE: f64 = 1.0e-12;
 const PIVOT_THRESHOLD: f64 = 1.0e-12;
@@ -27,6 +28,16 @@ pub struct Worker {
 }
 
 impl Worker {
+    pub fn from_dense(array: Array2<f64>) -> Self {
+        let (nrows, ncols) = array.dim();
+        let coo = array
+            .indexed_iter()
+            .filter(|&(_, &value)| value != 0.0)
+            .map(|((row, col), &value)| (row, col, value))
+            .collect::<Vec<_>>();
+        Self::from_coo_matrix(nrows, ncols, coo.into_iter())
+    }
+
     pub fn from_coo_matrix(
         nrows: usize,
         ncols: usize,
@@ -254,10 +265,17 @@ impl Worker {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+    use ndarray::array;
 
     #[test]
     fn from_coo_matrix_builds_workspace_with_empty_rows_and_columns() {
-        let worker = Worker::from_coo_matrix(4, 5, vec![(1, 3, 10.0), (3, 1, 20.0)].into_iter());
+        let matrix = array![
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 10.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 20.0, 0.0, 0.0, 0.0],
+        ];
+        let worker = Worker::from_dense(matrix);
 
         assert!(worker.rows[0].is_empty());
         assert_eq!(worker.rows[1].iter().collect::<Vec<_>>(), vec![(&3, &10.0)]);
@@ -281,87 +299,33 @@ mod tests {
 
     #[test]
     fn choose_pivot_prefers_minimum_markowitz_cost() {
-        let worker = Worker::from_coo_matrix(
-            3,
-            3,
-            vec![
-                (0, 0, 1.0),
-                (0, 1, 1.0),
-                (0, 2, 1.0),
-                (1, 0, 1.0),
-                (2, 1, 1.0),
-                (2, 2, 1.0),
-            ]
-            .into_iter(),
-        );
+        let matrix = array![[1.0, 1.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 1.0]];
+        let worker = Worker::from_dense(matrix);
 
         assert_eq!(worker.choose_pivot(), Some((1, 0)));
     }
 
     #[test]
-    fn factorize_reconstructs_square_matrix() {
-        let lu = LU::initial_factorize(
-            3,
-            3,
-            vec![
-                (0, 0, 2.0),
-                (0, 2, 1.0),
-                (1, 0, 4.0),
-                (1, 1, 3.0),
-                (2, 1, 5.0),
-                (2, 2, 6.0),
-            ]
-            .into_iter(),
-        );
-
-        let reconstructed = lu.reconstruct();
-
-        assert_abs_diff_eq!(
-            reconstructed,
-            ndarray::arr2(&[[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]]),
-            epsilon = 1.0e-9
-        );
-    }
-
-    #[test]
     fn factorize_reconstructs_rectangular_matrix() {
-        let lu = LU::initial_factorize(
-            3,
-            4,
-            vec![
-                (0, 0, 1.0),
-                (0, 3, 2.0),
-                (1, 1, 3.0),
-                (2, 0, 4.0),
-                (2, 2, 5.0),
-            ]
-            .into_iter(),
-        );
+        let matrix = array![
+            [1.0, 0.0, 0.0, 2.0],
+            [0.0, 3.0, 0.0, 0.0],
+            [4.0, 0.0, 5.0, 0.0],
+        ];
+        let lu = Worker::from_dense(matrix.clone()).factorize();
 
         let reconstructed = lu.reconstruct();
 
-        assert_abs_diff_eq!(
-            reconstructed,
-            ndarray::arr2(&[
-                [1.0, 0.0, 0.0, 2.0],
-                [0.0, 3.0, 0.0, 0.0],
-                [4.0, 0.0, 5.0, 0.0],
-            ]),
-            epsilon = 1.0e-9
-        );
+        assert_abs_diff_eq!(reconstructed, matrix, epsilon = 1.0e-9);
     }
 
     #[test]
     fn from_dense_factorizes_dense_matrix() {
-        let matrix = ndarray::arr2(&[[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]]);
+        let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
 
-        let lu = LU::from_dense(matrix);
+        let lu = LU::from_dense(matrix.clone());
         let reconstructed = lu.reconstruct();
 
-        assert_abs_diff_eq!(
-            reconstructed,
-            ndarray::arr2(&[[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]]),
-            epsilon = 1.0e-9
-        );
+        assert_abs_diff_eq!(reconstructed, matrix, epsilon = 1.0e-9);
     }
 }

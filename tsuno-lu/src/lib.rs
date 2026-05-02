@@ -41,12 +41,7 @@ impl LU {
 
     /// Initial factorization from a dense matrix.
     pub fn from_dense(array: Array2<f64>) -> Self {
-        let (nrows, ncols) = array.dim();
-        let coo = array
-            .indexed_iter()
-            .map(|((row, col), &value)| (row, col, value))
-            .collect::<Vec<_>>();
-        Self::initial_factorize(nrows, ncols, coo.into_iter())
+        Worker::from_dense(array).factorize()
     }
 
     pub fn l(&self) -> &L {
