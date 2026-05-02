@@ -97,6 +97,7 @@ pub use upper::*;
 /// This eta representation is the first update mechanism used by this crate.
 /// The long-term plan is to replace or supplement it with Forrest--Tomlin-style
 /// updates once the product-form update path is fully established.
+#[derive(Debug)]
 pub struct LU {
     nrows: usize,
     ncols: usize,
