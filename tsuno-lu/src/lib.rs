@@ -136,25 +136,25 @@ mod tests {
     #[test]
     fn solve_solves_dense_rhs() {
         let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
-        let rhs = array![7.0, 14.0, 23.0];
+        let expected_solution = array![1.0, 2.0, 5.0];
+        let rhs = matrix.dot(&expected_solution);
         let lu = LU::from_dense(matrix.clone());
 
         let solution = lu.solve(&rhs);
-        let reconstructed_rhs = matrix.dot(&solution);
 
-        assert_abs_diff_eq!(reconstructed_rhs, rhs, epsilon = 1.0e-9);
+        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
     }
 
     #[test]
     fn solve_handles_permuted_pivots() {
         let matrix = array![[0.0, 2.0, 0.0], [3.0, 0.0, 4.0], [0.0, 5.0, 6.0]];
-        let rhs = array![4.0, 23.0, 28.0];
+        let expected_solution = array![3.0, 2.0, 4.0];
+        let rhs = matrix.dot(&expected_solution);
         let lu = LU::from_dense(matrix.clone());
 
         let solution = lu.solve(&rhs);
-        let reconstructed_rhs = matrix.dot(&solution);
 
-        assert_abs_diff_eq!(reconstructed_rhs, rhs, epsilon = 1.0e-9);
+        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
     }
 
     #[test]
