@@ -113,6 +113,10 @@ impl StandardFormLp {
         Basis::new(&self.a, indices).map_err(StandardFormError::Basis)
     }
 
+    /// Return the basis cost vector.
+    ///
+    /// For a basis index set $I = \{j_0, j_1, \ldots, j_{m-1}\}$, this returns
+    /// $c_I = [c_{j_0}, c_{j_1}, \ldots, c_{j_{m-1}}]^T$.
     pub fn basis_costs(&self, basis: &Basis) -> Array1<f64> {
         Array1::from_iter(basis.indices().iter().map(|&index| self.c[index]))
     }
