@@ -2,9 +2,11 @@
 
 mod initial_factorize;
 mod lower;
+mod solve;
+mod solve_transposed;
 mod upper;
 
-use ndarray::{Array1, Array2};
+use ndarray::Array2;
 
 pub use initial_factorize::*;
 pub use lower::*;
@@ -60,93 +62,6 @@ impl LU {
         &self.q
     }
 
-    /// Solve a linear system with the represented matrix.
-    ///
-    /// This computes `x` in `A x = rhs` using the initial sparse LU
-    /// factorization, without explicitly forming `A^{-1}`.
-    pub fn solve(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        assert_solve_ready(self);
-        assert_eq!(
-            rhs.len(),
-            self.nrows,
-            "right-hand side length must match the matrix row dimension"
-        );
-
-        let mut transformed_rhs = rhs.to_owned();
-        for (mu, row, col) in self.l.units() {
-            transformed_rhs[row] -= mu * transformed_rhs[col];
-        }
-
-        let mut pivot_rhs = Array1::zeros(self.nrows);
-        for (step, &row) in self.p.iter().enumerate() {
-            pivot_rhs[step] = transformed_rhs[row];
-        }
-
-        let pivot_rows = self
-            .u
-            .rows()
-            .map(|row| row.collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-        let mut solution = Array1::zeros(self.ncols);
-        for step in (0..pivot_rows.len()).rev() {
-            let row = &pivot_rows[step];
-            let (pivot_col, pivot) = row[0];
-            let known_sum = row[1..]
-                .iter()
-                .map(|&(col, value)| value * solution[col])
-                .sum::<f64>();
-            solution[pivot_col] = (pivot_rhs[step] - known_sum) / pivot;
-        }
-
-        solution
-    }
-
-    /// Solve a transposed linear system with the represented matrix.
-    ///
-    /// This computes `x` in `A^T x = rhs` using the initial sparse LU
-    /// factorization, without explicitly forming `A^{-T}`.
-    pub fn solve_transposed(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        assert_solve_ready(self);
-        assert_eq!(
-            rhs.len(),
-            self.ncols,
-            "right-hand side length must match the matrix column dimension"
-        );
-
-        let pivot_rows = self
-            .u
-            .rows()
-            .map(|row| row.collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-        let mut pivot_solution = Array1::zeros(self.nrows);
-        for step in 0..pivot_rows.len() {
-            let row = &pivot_rows[step];
-            let (pivot_col, pivot) = row[0];
-            let known_sum = pivot_rows[..step]
-                .iter()
-                .enumerate()
-                .map(|(previous_step, previous_row)| {
-                    previous_row
-                        .iter()
-                        .find(|&&(col, _)| col == pivot_col)
-                        .map(|&(_, value)| value * pivot_solution[previous_step])
-                        .unwrap_or(0.0)
-                })
-                .sum::<f64>();
-            pivot_solution[step] = (rhs[pivot_col] - known_sum) / pivot;
-        }
-
-        let mut solution = Array1::zeros(self.nrows);
-        for (step, &row) in self.p.iter().enumerate() {
-            solution[row] = pivot_solution[step];
-        }
-        for (mu, row, col) in self.l.units().collect::<Vec<_>>().into_iter().rev() {
-            solution[col] -= mu * solution[row];
-        }
-
-        solution
-    }
-
     pub fn reconstruct(&self) -> Array2<f64> {
         let mut matrix = Array2::zeros((self.nrows, self.ncols));
         for (step, row) in self.u.rows().enumerate() {
@@ -164,84 +79,11 @@ impl LU {
     }
 }
 
-fn assert_solve_ready(lu: &LU) {
+pub(crate) fn assert_solve_ready(lu: &LU) {
     assert_eq!(lu.nrows, lu.ncols, "solve requires a square matrix");
     assert_eq!(
         lu.p.len(),
         lu.nrows,
         "solve requires a full-rank factorization"
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use approx::assert_abs_diff_eq;
-    use ndarray::array;
-
-    #[test]
-    fn solve_solves_dense_rhs() {
-        let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
-        let expected_solution = array![1.0, 2.0, 5.0];
-        let rhs = matrix.dot(&expected_solution);
-        let lu = LU::from_dense(matrix.clone());
-
-        let solution = lu.solve(&rhs);
-
-        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
-    }
-
-    #[test]
-    fn solve_handles_permuted_pivots() {
-        let matrix = array![[0.0, 2.0, 0.0], [3.0, 0.0, 4.0], [0.0, 5.0, 6.0]];
-        let expected_solution = array![3.0, 2.0, 4.0];
-        let rhs = matrix.dot(&expected_solution);
-        let lu = LU::from_dense(matrix.clone());
-
-        let solution = lu.solve(&rhs);
-
-        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
-    }
-
-    #[test]
-    #[should_panic(expected = "solve requires a square matrix")]
-    fn solve_rejects_rectangular_matrix() {
-        let matrix = array![[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]];
-        let lu = LU::from_dense(matrix);
-
-        lu.solve(&array![1.0, 2.0]);
-    }
-
-    #[test]
-    fn solve_transposed_solves_dense_rhs() {
-        let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
-        let expected_solution = array![1.0, 2.0, 5.0];
-        let rhs = matrix.t().dot(&expected_solution);
-        let lu = LU::from_dense(matrix);
-
-        let solution = lu.solve_transposed(&rhs);
-
-        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
-    }
-
-    #[test]
-    fn solve_transposed_handles_permuted_pivots() {
-        let matrix = array![[0.0, 2.0, 0.0], [3.0, 0.0, 4.0], [0.0, 5.0, 6.0]];
-        let expected_solution = array![3.0, 2.0, 4.0];
-        let rhs = matrix.t().dot(&expected_solution);
-        let lu = LU::from_dense(matrix);
-
-        let solution = lu.solve_transposed(&rhs);
-
-        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
-    }
-
-    #[test]
-    #[should_panic(expected = "solve requires a square matrix")]
-    fn solve_transposed_rejects_rectangular_matrix() {
-        let matrix = array![[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]];
-        let lu = LU::from_dense(matrix);
-
-        lu.solve_transposed(&array![1.0, 2.0, 3.0]);
-    }
 }
