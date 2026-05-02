@@ -1,6 +1,34 @@
 use ndarray::Array1;
 
-use super::{LU, assert_solve_ready};
+use super::LU;
+
+const DEFAULT_ETA_PIVOT_TOLERANCE: f64 = 1.0e-12;
+
+/// Error returned when a column replacement cannot be stored as an eta update.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UpdateError {
+    NonSquareMatrix {
+        nrows: usize,
+        ncols: usize,
+    },
+    RankDeficientFactorization {
+        rank: usize,
+        dimension: usize,
+    },
+    PivotOutOfBounds {
+        pivot: usize,
+        dimension: usize,
+    },
+    InvalidColumnLength {
+        len: usize,
+        expected: usize,
+    },
+    SmallEtaPivot {
+        pivot: usize,
+        value: f64,
+        tolerance: f64,
+    },
+}
 
 /// Product-form column replacement update.
 ///
@@ -58,21 +86,68 @@ impl LU {
     /// This updates the represented matrix from `A` to `A E`, where `E` is the
     /// identity matrix with `pivot` column replaced by `A^{-1} new_column`.
     /// The underlying sparse LU factors are not recomputed.
-    pub fn replace_column(&mut self, pivot: usize, new_column: &Array1<f64>) {
-        assert_solve_ready(self);
-        assert!(
-            pivot < self.ncols,
-            "replacement column index must be in bounds"
-        );
-        assert_eq!(
-            new_column.len(),
-            self.nrows,
-            "replacement column length must match the matrix row dimension"
-        );
+    pub fn replace_column(
+        &mut self,
+        pivot: usize,
+        new_column: &Array1<f64>,
+    ) -> Result<(), UpdateError> {
+        self.replace_column_with_pivot_tolerance(pivot, new_column, DEFAULT_ETA_PIVOT_TOLERANCE)
+    }
+
+    pub fn replace_column_with_pivot_tolerance(
+        &mut self,
+        pivot: usize,
+        new_column: &Array1<f64>,
+        pivot_tolerance: f64,
+    ) -> Result<(), UpdateError> {
+        self.check_update_ready(pivot, new_column)?;
 
         let column = self.solve(new_column);
-        assert!(column[pivot] != 0.0, "eta pivot entry must be non-zero");
+        if column[pivot].abs() <= pivot_tolerance {
+            return Err(UpdateError::SmallEtaPivot {
+                pivot,
+                value: column[pivot],
+                tolerance: pivot_tolerance,
+            });
+        }
         self.eta_updates.push(EtaUpdate { pivot, column });
+        Ok(())
+    }
+
+    pub fn should_refactor(&self, max_updates: usize) -> bool {
+        self.update_count() >= max_updates
+    }
+
+    fn check_update_ready(
+        &self,
+        pivot: usize,
+        new_column: &Array1<f64>,
+    ) -> Result<(), UpdateError> {
+        if self.nrows != self.ncols {
+            return Err(UpdateError::NonSquareMatrix {
+                nrows: self.nrows,
+                ncols: self.ncols,
+            });
+        }
+        if self.p.len() != self.nrows {
+            return Err(UpdateError::RankDeficientFactorization {
+                rank: self.p.len(),
+                dimension: self.nrows,
+            });
+        }
+        if pivot >= self.ncols {
+            return Err(UpdateError::PivotOutOfBounds {
+                pivot,
+                dimension: self.ncols,
+            });
+        }
+        if new_column.len() != self.nrows {
+            return Err(UpdateError::InvalidColumnLength {
+                len: new_column.len(),
+                expected: self.nrows,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -81,7 +156,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::array;
 
-    use super::super::LU;
+    use super::super::{LU, UpdateError};
 
     #[test]
     fn replace_column_reconstructs_updated_matrix() {
@@ -90,7 +165,7 @@ mod tests {
         let mut expected = matrix.clone();
         let mut lu = LU::from_dense(matrix);
 
-        lu.replace_column(1, &replacement);
+        lu.replace_column(1, &replacement).unwrap();
         expected.column_mut(1).assign(&replacement);
 
         assert_abs_diff_eq!(lu.reconstruct(), expected, epsilon = 1.0e-9);
@@ -104,9 +179,9 @@ mod tests {
         let mut expected = matrix.clone();
         let mut lu = LU::from_dense(matrix);
 
-        lu.replace_column(1, &first_replacement);
+        lu.replace_column(1, &first_replacement).unwrap();
         expected.column_mut(1).assign(&first_replacement);
-        lu.replace_column(0, &second_replacement);
+        lu.replace_column(0, &second_replacement).unwrap();
         expected.column_mut(0).assign(&second_replacement);
 
         assert_abs_diff_eq!(lu.reconstruct(), expected, epsilon = 1.0e-9);
@@ -116,11 +191,49 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "replacement column index must be in bounds")]
     fn replace_column_rejects_out_of_bounds_pivot() {
         let matrix = array![[1.0, 0.0], [0.0, 1.0]];
         let mut lu = LU::from_dense(matrix);
 
-        lu.replace_column(2, &array![1.0, 2.0]);
+        let error = lu.replace_column(2, &array![1.0, 2.0]).unwrap_err();
+
+        assert_eq!(
+            error,
+            UpdateError::PivotOutOfBounds {
+                pivot: 2,
+                dimension: 2
+            }
+        );
+    }
+
+    #[test]
+    fn replace_column_rejects_small_eta_pivot() {
+        let matrix = array![[1.0, 0.0], [0.0, 1.0]];
+        let mut lu = LU::from_dense(matrix);
+
+        let error = lu
+            .replace_column_with_pivot_tolerance(0, &array![0.0, 1.0], 1.0e-12)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            UpdateError::SmallEtaPivot {
+                pivot: 0,
+                value: 0.0,
+                tolerance: 1.0e-12
+            }
+        );
+    }
+
+    #[test]
+    fn should_refactor_reports_update_limit() {
+        let matrix = array![[1.0, 0.0], [0.0, 1.0]];
+        let mut lu = LU::from_dense(matrix);
+
+        assert!(!lu.should_refactor(1));
+
+        lu.replace_column(0, &array![2.0, 0.0]).unwrap();
+
+        assert!(lu.should_refactor(1));
     }
 }

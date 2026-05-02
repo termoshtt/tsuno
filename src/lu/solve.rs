@@ -119,7 +119,7 @@ mod tests {
         let expected_solution = array![1.0, 2.0, 5.0];
         let mut lu = LU::from_dense(matrix.clone());
 
-        lu.replace_column(1, &replacement);
+        lu.replace_column(1, &replacement).unwrap();
         matrix.column_mut(1).assign(&replacement);
         let rhs = matrix.dot(&expected_solution);
         let solution = lu.solve(&rhs);
@@ -136,9 +136,9 @@ mod tests {
         let expected_solution = array![1.0, 2.0, 5.0];
         let mut lu = LU::from_dense(matrix.clone());
 
-        lu.replace_column(1, &first_replacement);
+        lu.replace_column(1, &first_replacement).unwrap();
         matrix.column_mut(1).assign(&first_replacement);
-        lu.replace_column(0, &second_replacement);
+        lu.replace_column(0, &second_replacement).unwrap();
         matrix.column_mut(0).assign(&second_replacement);
         let rhs = matrix.dot(&expected_solution);
         let solution = lu.solve(&rhs);
