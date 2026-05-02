@@ -5,6 +5,8 @@ Simplex-based LP solver/analyzer for advanced usages.
 
 - `tsuno::lu`: sparse LU factorization and eta-update linear algebra kernels
   for revised simplex methods.
+- `tsuno::simplex`: standard-form LP and basis-level building blocks for the
+  revised simplex method.
 
 ## `tsuno::lu` Planned Features
 
@@ -49,11 +51,49 @@ abbreviations.
 - [ ] Provide residual checks for basis solves and transposed basis solves.
 - [ ] Provide sparse right-hand-side solve paths for basis systems.
 - [ ] Provide sparse right-hand-side solve paths for transposed basis systems.
-- [ ] Provide row/column access helpers for simplex pricing operations.
 - [ ] Add Forrest-Tomlin-style updates to reduce product-form update growth.
   - Long-term direction: replace or supplement accumulated eta updates with a
     Forrest-Tomlin representation once the product-form update path is correct
     and covered by tests.
+
+## `tsuno::simplex` Planned Features
+
+`tsuno::simplex` provides the LP-side structures that sit above the LU kernel:
+standard-form problem data, basis ownership, pricing quantities, and eventually
+the revised simplex iteration loop.
+
+- [x] Represent a standard-form LP as `A`, `b`, and `c`.
+  - Name: `StandardFormLp`, for `min c^T x` subject to `A x = b`, `x >= 0`.
+- [x] Build a basis representation from a standard-form matrix and basis
+  column indices.
+  - Name: `Basis`.
+- [x] Solve basis systems through the LU-backed basis representation.
+  - Name: `Basis::solve`, for `B x = rhs`.
+- [x] Solve transposed basis systems through the LU-backed basis representation.
+  - Name: `Basis::solve_transposed`, for `B^T x = rhs`.
+- [x] Replace one basis column after a pivot.
+  - Name: `Basis::replace_column`.
+- [x] Return a constraint matrix column for pricing and basis replacement.
+  - Name: `StandardFormLp::column`, returning `A_j`.
+- [x] Compute the basis cost vector.
+  - Name: `StandardFormLp::basis_costs`, returning `c_I`.
+- [x] Compute dual variables for a basis.
+  - Name: `StandardFormLp::dual_variables`, returning `y = B^{-T} c_I`.
+- [x] Compute the reduced cost of a single column.
+  - Name: `StandardFormLp::reduced_cost`, returning `r_j = c_j - A_j^T y`.
+- [x] Return the nonbasis column indices.
+  - Name: `StandardFormLp::nonbasis_indices`.
+- [x] Compute reduced costs for all nonbasis columns.
+  - Name: `StandardFormLp::reduced_costs`.
+- [ ] Select an entering column from reduced costs.
+- [ ] Compute the current basic solution.
+  - Proposed name: `basic_solution`, returning `x_I = B^{-1} b`.
+- [ ] Compute a pivot direction for an entering column.
+  - Proposed name: `pivot_direction`, returning `d = B^{-1} A_q`.
+- [ ] Select a leaving basis position with a ratio test.
+- [ ] Apply one primal simplex pivot by updating the basis and bookkeeping.
+- [ ] Represent iteration outcomes such as optimal, unbounded, and pivoted.
+- [ ] Implement Phase I or another explicit feasible-basis construction path.
 
 # License
 Copyright (c) 2026 Toshiki Teramura (@termoshtt)

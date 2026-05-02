@@ -65,12 +65,24 @@ pub struct StandardFormLp {
     c: Array1<f64>,
 }
 
+#[katexit::katexit]
+/// Reduced cost of a single nonbasis column.
+///
+/// The `column` field is the original column index `j` in `A`, and `value` is
+/// the reduced cost $r_j = c_j - A_j^T y$.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReducedCost {
+    pub column: usize,
+    pub value: f64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum StandardFormError {
     EmptyProblem,
     TooFewColumns { nrows: usize, ncols: usize },
     RightHandSideLengthMismatch { expected: usize, actual: usize },
     CostLengthMismatch { expected: usize, actual: usize },
+    BasisDimensionMismatch { expected: usize, actual: usize },
     DualVariableLengthMismatch { expected: usize, actual: usize },
     ColumnOutOfBounds { column: usize, ncols: usize },
     Basis(BasisError),
@@ -117,17 +129,20 @@ impl StandardFormLp {
     ///
     /// For a basis index set $I = \{j_0, j_1, \ldots, j_{m-1}\}$, this returns
     /// $c_I = [c_{j_0}, c_{j_1}, \ldots, c_{j_{m-1}}]^T$.
-    pub fn basis_costs(&self, basis: &Basis) -> Array1<f64> {
-        Array1::from_iter(basis.indices().iter().map(|&index| self.c[index]))
+    pub fn basis_costs(&self, basis: &Basis) -> Result<Array1<f64>, StandardFormError> {
+        self.basis_membership(basis)?;
+        Ok(Array1::from_iter(
+            basis.indices().iter().map(|&index| self.c[index]),
+        ))
     }
 
     /// Compute the dual variables for the given basis.
     ///
     /// For a basis matrix $B = A_I$ and basis cost vector $c_I$, this returns
     /// $y$ satisfying $B^T y = c_I$, equivalently $y = B^{-T} c_I$.
-    pub fn dual_variables(&self, basis: &Basis) -> Array1<f64> {
-        let basis_costs = self.basis_costs(basis);
-        basis.solve_transposed(&basis_costs)
+    pub fn dual_variables(&self, basis: &Basis) -> Result<Array1<f64>, StandardFormError> {
+        let basis_costs = self.basis_costs(basis)?;
+        Ok(basis.solve_transposed(&basis_costs))
     }
 
     /// Compute the reduced cost of a column.
@@ -147,6 +162,55 @@ impl StandardFormLp {
         }
         let column_view = self.column(column)?;
         Ok(self.c[column] - column_view.dot(dual_variables))
+    }
+
+    /// Return the nonbasis column indices.
+    ///
+    /// For the basis index set $I$, this returns the complement
+    /// $\{0, 1, \ldots, n - 1\} \setminus I$ in ascending column order.
+    pub fn nonbasis_indices(&self, basis: &Basis) -> Result<Vec<usize>, StandardFormError> {
+        let basis_membership = self.basis_membership(basis)?;
+        Ok(basis_membership
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &is_basis)| (!is_basis).then_some(index))
+            .collect())
+    }
+
+    /// Compute reduced costs for all nonbasis columns.
+    ///
+    /// This first computes the dual variables $y = B^{-T} c_I$, then returns
+    /// $r_j = c_j - A_j^T y$ for every $j \notin I$.
+    pub fn reduced_costs(&self, basis: &Basis) -> Result<Vec<ReducedCost>, StandardFormError> {
+        let dual_variables = self.dual_variables(basis)?;
+        self.nonbasis_indices(basis)?
+            .into_iter()
+            .map(|column| {
+                self.reduced_cost(&dual_variables, column)
+                    .map(|value| ReducedCost { column, value })
+            })
+            .collect()
+    }
+
+    fn basis_membership(&self, basis: &Basis) -> Result<Vec<bool>, StandardFormError> {
+        if basis.indices().len() != self.a.nrows() {
+            return Err(StandardFormError::BasisDimensionMismatch {
+                expected: self.a.nrows(),
+                actual: basis.indices().len(),
+            });
+        }
+
+        let mut basis_membership = vec![false; self.a.ncols()];
+        for &column in basis.indices() {
+            if column >= self.a.ncols() {
+                return Err(StandardFormError::ColumnOutOfBounds {
+                    column,
+                    ncols: self.a.ncols(),
+                });
+            }
+            basis_membership[column] = true;
+        }
+        Ok(basis_membership)
     }
 }
 
@@ -241,7 +305,7 @@ mod tests {
         let lp = example_lp();
         let basis = lp.basis(vec![0, 1]).unwrap();
 
-        let costs = lp.basis_costs(&basis);
+        let costs = lp.basis_costs(&basis).unwrap();
 
         assert_abs_diff_eq!(costs, array![5.0, 4.0], epsilon = 1.0e-9);
     }
@@ -251,7 +315,7 @@ mod tests {
         let lp = example_lp();
         let basis = lp.basis(vec![0, 1]).unwrap();
 
-        let dual_variables = lp.dual_variables(&basis);
+        let dual_variables = lp.dual_variables(&basis).unwrap();
 
         assert_abs_diff_eq!(
             dual_variables,
@@ -264,11 +328,77 @@ mod tests {
     fn reduced_cost_uses_dual_variables() {
         let lp = example_lp();
         let basis = lp.basis(vec![0, 1]).unwrap();
-        let dual_variables = lp.dual_variables(&basis);
+        let dual_variables = lp.dual_variables(&basis).unwrap();
 
         let reduced_cost = lp.reduced_cost(&dual_variables, 2).unwrap();
 
         assert_abs_diff_eq!(reduced_cost, -6.0 / 5.0, epsilon = 1.0e-9);
+    }
+
+    #[test]
+    fn nonbasis_indices_returns_basis_complement() {
+        let lp = slack_lp();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let nonbasis = lp.nonbasis_indices(&basis).unwrap();
+
+        assert_eq!(nonbasis, vec![0, 1]);
+    }
+
+    #[test]
+    fn reduced_costs_returns_nonbasis_reduced_costs() {
+        let lp = slack_lp();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let reduced_costs = lp.reduced_costs(&basis).unwrap();
+
+        assert_eq!(
+            reduced_costs,
+            vec![
+                ReducedCost {
+                    column: 0,
+                    value: 1.0
+                },
+                ReducedCost {
+                    column: 1,
+                    value: 2.0
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn basis_costs_rejects_basis_dimension_mismatch() {
+        let lp = example_lp();
+        let other_matrix = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let basis = Basis::new(&other_matrix, vec![0, 1, 2]).unwrap();
+
+        let error = lp.basis_costs(&basis).unwrap_err();
+
+        assert_eq!(
+            error,
+            StandardFormError::BasisDimensionMismatch {
+                expected: 2,
+                actual: 3
+            }
+        );
+    }
+
+    #[test]
+    fn nonbasis_indices_rejects_basis_column_out_of_bounds() {
+        let lp = example_lp();
+        let other_matrix = array![[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]];
+        let basis = Basis::new(&other_matrix, vec![0, 3]).unwrap();
+
+        let error = lp.nonbasis_indices(&basis).unwrap_err();
+
+        assert_eq!(
+            error,
+            StandardFormError::ColumnOutOfBounds {
+                column: 3,
+                ncols: 3
+            }
+        );
     }
 
     #[test]
