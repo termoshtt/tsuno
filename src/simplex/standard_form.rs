@@ -94,6 +94,11 @@ impl StandardFormLp {
         &self.c
     }
 
+    /// Return the `j`-th column of the constraint matrix.
+    ///
+    /// The stored problem data is named `a`, `b`, and `c`, following the
+    /// standard-form notation. This method returns $A_j$, the column of `A`
+    /// used for pricing and basis replacement.
     pub fn column(&self, column: usize) -> Result<ArrayView1<'_, f64>, StandardFormError> {
         if column >= self.a.ncols() {
             return Err(StandardFormError::ColumnOutOfBounds {
