@@ -17,12 +17,33 @@ pub struct Worker {
     nrows: usize,
     ncols: usize,
 
-    rows: Vec<BTreeMap<usize, f64>>,
-    cols: Vec<BTreeMap<usize, f64>>,
+    /// Mutable row-major view of the current work matrix.
+    ///
+    /// This stores the unfactorized part of the matrix and is updated during
+    /// elimination. Fill-ins are inserted here and dropped entries are removed.
+    work_rows: Vec<BTreeMap<usize, f64>>,
+    /// Mutable column-major view of the current work matrix.
+    ///
+    /// This mirrors `work_rows` so pivot search and column elimination can find
+    /// active non-zeros without scanning every row.
+    work_cols: Vec<BTreeMap<usize, f64>>,
+    /// Rows still present in the current Schur complement.
+    ///
+    /// Once a row is selected as a pivot row and stored in `U`, it is marked
+    /// inactive and excluded from later pivot search and row updates.
     active_rows: Vec<bool>,
+    /// Columns still present in the current Schur complement.
+    ///
+    /// Once a column is selected as a pivot column and eliminated from active
+    /// rows, it is marked inactive and excluded from later pivot search and
+    /// Markowitz counts.
     active_cols: Vec<bool>,
     l_units: Vec<UnitTriangle>,
-    u_rows: Vec<Vec<(usize, f64)>>,
+    /// Finalized rows of `U` in factorization order.
+    ///
+    /// A pivot row is copied here before the corresponding work row is cleared
+    /// and marked inactive.
+    factorized_u_rows: Vec<Vec<(usize, f64)>>,
     p: Vec<usize>,
     q: Vec<usize>,
 }
@@ -58,16 +79,16 @@ impl Worker {
             );
         }
 
-        let mut rows = vec![BTreeMap::new(); nrows];
-        let mut cols = vec![BTreeMap::new(); ncols];
+        let mut work_rows = vec![BTreeMap::new(); nrows];
+        let mut work_cols = vec![BTreeMap::new(); ncols];
         for (row, col, value) in entries {
-            let value = rows[row].get(&col).copied().unwrap_or(0.0) + value;
+            let value = work_rows[row].get(&col).copied().unwrap_or(0.0) + value;
             if value.abs() <= DROP_TOLERANCE {
-                rows[row].remove(&col);
-                cols[col].remove(&row);
+                work_rows[row].remove(&col);
+                work_cols[col].remove(&row);
             } else {
-                rows[row].insert(col, value);
-                cols[col].insert(row, value);
+                work_rows[row].insert(col, value);
+                work_cols[col].insert(row, value);
             }
         }
 
@@ -75,26 +96,26 @@ impl Worker {
             step: 0,
             nrows,
             ncols,
-            rows,
-            cols,
+            work_rows,
+            work_cols,
             active_rows: vec![true; nrows],
             active_cols: vec![true; ncols],
             l_units: Vec::new(),
-            u_rows: Vec::new(),
+            factorized_u_rows: Vec::new(),
             p: Vec::new(),
             q: Vec::new(),
         }
     }
 
     fn active_row_len(&self, row: usize) -> usize {
-        self.rows[row]
+        self.work_rows[row]
             .keys()
             .filter(|&&col| self.active_cols[col])
             .count()
     }
 
     fn active_col_len(&self, col: usize) -> usize {
-        self.cols[col]
+        self.work_cols[col]
             .keys()
             .filter(|&&row| self.active_rows[row])
             .count()
@@ -102,11 +123,11 @@ impl Worker {
 
     fn set_entry(&mut self, row: usize, col: usize, value: f64) {
         if value.abs() <= DROP_TOLERANCE {
-            self.rows[row].remove(&col);
-            self.cols[col].remove(&row);
+            self.work_rows[row].remove(&col);
+            self.work_cols[col].remove(&row);
         } else {
-            self.rows[row].insert(col, value);
-            self.cols[col].insert(row, value);
+            self.work_rows[row].insert(col, value);
+            self.work_cols[col].insert(row, value);
         }
     }
 
@@ -141,11 +162,11 @@ impl Worker {
             if row_count == 0 {
                 continue;
             }
-            for (&col, &value) in &self.rows[row] {
+            for (&col, &value) in &self.work_rows[row] {
                 if !self.active_cols[col] || value.abs() <= DROP_TOLERANCE {
                     continue;
                 }
-                let col_max = self.cols[col]
+                let col_max = self.work_cols[col]
                     .iter()
                     .filter(|(candidate_row, _)| self.active_rows[**candidate_row])
                     .map(|(_, candidate)| candidate.abs())
@@ -196,12 +217,12 @@ impl Worker {
         debug_assert!(self.active_rows[i]);
         debug_assert!(self.active_cols[j]);
 
-        let pivot = *self.rows[i]
+        let pivot = *self.work_rows[i]
             .get(&j)
             .expect("pivot must exist in the active matrix");
         assert!(pivot.abs() > DROP_TOLERANCE, "pivot must be non-zero");
 
-        let pivot_row = self.rows[i]
+        let pivot_row = self.work_rows[i]
             .iter()
             .filter(|(col, value)| self.active_cols[**col] && value.abs() > DROP_TOLERANCE)
             .map(|(&col, &value)| (col, value))
@@ -211,7 +232,7 @@ impl Worker {
         u_row.push((j, pivot));
         u_row.extend(pivot_row.iter().copied().filter(|&(col, _)| col != j));
 
-        let target_rows = self.cols[j]
+        let target_rows = self.work_cols[j]
             .iter()
             .filter(|(row, _)| self.active_rows[**row] && **row != i)
             .map(|(&row, &value)| (row, value))
@@ -227,19 +248,20 @@ impl Worker {
                 if col == j {
                     continue;
                 }
-                let value = self.rows[row].get(&col).copied().unwrap_or(0.0) - mu * pivot_value;
+                let value =
+                    self.work_rows[row].get(&col).copied().unwrap_or(0.0) - mu * pivot_value;
                 self.set_entry(row, col, value);
             }
             self.set_entry(row, j, 0.0);
         }
 
         for &(col, _) in &pivot_row {
-            self.cols[col].remove(&i);
+            self.work_cols[col].remove(&i);
         }
-        self.rows[i].clear();
+        self.work_rows[i].clear();
         self.active_rows[i] = false;
         self.active_cols[j] = false;
-        self.u_rows.push(u_row);
+        self.factorized_u_rows.push(u_row);
         self.p.push(i);
         self.q.push(j);
         self.step += 1;
@@ -256,7 +278,7 @@ impl Worker {
             nrows: self.nrows,
             ncols: self.ncols,
             l: L::from_units(self.l_units),
-            u: U::from_rows(self.u_rows),
+            u: U::from_rows(self.factorized_u_rows),
             p: self.p,
             q: self.q,
         }
@@ -279,12 +301,24 @@ mod tests {
         ];
         let worker = Worker::from_dense(matrix);
 
-        assert!(worker.rows[0].is_empty());
-        assert_eq!(worker.rows[1].iter().collect::<Vec<_>>(), vec![(&3, &10.0)]);
-        assert!(worker.rows[2].is_empty());
-        assert_eq!(worker.rows[3].iter().collect::<Vec<_>>(), vec![(&1, &20.0)]);
-        assert_eq!(worker.cols[1].iter().collect::<Vec<_>>(), vec![(&3, &20.0)]);
-        assert_eq!(worker.cols[3].iter().collect::<Vec<_>>(), vec![(&1, &10.0)]);
+        assert!(worker.work_rows[0].is_empty());
+        assert_eq!(
+            worker.work_rows[1].iter().collect::<Vec<_>>(),
+            vec![(&3, &10.0)]
+        );
+        assert!(worker.work_rows[2].is_empty());
+        assert_eq!(
+            worker.work_rows[3].iter().collect::<Vec<_>>(),
+            vec![(&1, &20.0)]
+        );
+        assert_eq!(
+            worker.work_cols[1].iter().collect::<Vec<_>>(),
+            vec![(&3, &20.0)]
+        );
+        assert_eq!(
+            worker.work_cols[3].iter().collect::<Vec<_>>(),
+            vec![(&1, &10.0)]
+        );
     }
 
     #[test]
