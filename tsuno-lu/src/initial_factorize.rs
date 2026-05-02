@@ -253,6 +253,7 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn from_coo_matrix_builds_workspace_with_empty_rows_and_columns() {
@@ -297,19 +298,6 @@ mod tests {
         assert_eq!(worker.choose_pivot(), Some((1, 0)));
     }
 
-    fn assert_matrix_approx_eq(actual: &ndarray::Array2<f64>, expected: &[Vec<f64>]) {
-        assert_eq!(actual.nrows(), expected.len());
-        for (actual_row, expected_row) in actual.rows().into_iter().zip(expected) {
-            assert_eq!(actual_row.len(), expected_row.len());
-            for (&actual, &expected) in actual_row.iter().zip(expected_row) {
-                assert!(
-                    (actual - expected).abs() < 1.0e-9,
-                    "expected {expected}, got {actual}"
-                );
-            }
-        }
-    }
-
     #[test]
     fn factorize_reconstructs_square_matrix() {
         let lu = LU::initial_factorize(
@@ -328,13 +316,10 @@ mod tests {
 
         let reconstructed = lu.reconstruct();
 
-        assert_matrix_approx_eq(
-            &reconstructed,
-            &[
-                vec![2.0, 0.0, 1.0],
-                vec![4.0, 3.0, 0.0],
-                vec![0.0, 5.0, 6.0],
-            ],
+        assert_abs_diff_eq!(
+            reconstructed,
+            ndarray::arr2(&[[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]]),
+            epsilon = 1.0e-9
         );
     }
 
@@ -355,13 +340,28 @@ mod tests {
 
         let reconstructed = lu.reconstruct();
 
-        assert_matrix_approx_eq(
-            &reconstructed,
-            &[
-                vec![1.0, 0.0, 0.0, 2.0],
-                vec![0.0, 3.0, 0.0, 0.0],
-                vec![4.0, 0.0, 5.0, 0.0],
-            ],
+        assert_abs_diff_eq!(
+            reconstructed,
+            ndarray::arr2(&[
+                [1.0, 0.0, 0.0, 2.0],
+                [0.0, 3.0, 0.0, 0.0],
+                [4.0, 0.0, 5.0, 0.0],
+            ]),
+            epsilon = 1.0e-9
+        );
+    }
+
+    #[test]
+    fn from_dense_factorizes_dense_matrix() {
+        let matrix = ndarray::arr2(&[[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]]);
+
+        let lu = LU::from_dense(matrix);
+        let reconstructed = lu.reconstruct();
+
+        assert_abs_diff_eq!(
+            reconstructed,
+            ndarray::arr2(&[[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]]),
+            epsilon = 1.0e-9
         );
     }
 }

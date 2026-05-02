@@ -39,6 +39,16 @@ impl LU {
         Worker::from_coo_matrix(nrows, ncols, coo).factorize()
     }
 
+    /// Initial factorization from a dense matrix.
+    pub fn from_dense(array: Array2<f64>) -> Self {
+        let (nrows, ncols) = array.dim();
+        let coo = array
+            .indexed_iter()
+            .map(|((row, col), &value)| (row, col, value))
+            .collect::<Vec<_>>();
+        Self::initial_factorize(nrows, ncols, coo.into_iter())
+    }
+
     pub fn l(&self) -> &L {
         &self.l
     }
