@@ -23,14 +23,18 @@ Fortran-style abbreviations.
   - Name: `solve_transposed(&Array1<f64>) -> Array1<f64>`, for
     `A^T x = rhs`. In a simplex solver, this is used with the current basis
     matrix `B`.
-- [ ] Add a product-form basis column replacement.
-  - Proposed name: `replace_basis_column`, storing the eta column
-    `B^{-1} a_q` and the leaving basis position.
-- [ ] Apply accumulated column replacements when solving basis systems.
-- [ ] Apply accumulated column replacements in reverse order when solving
+- [x] Add a product-form basis column replacement.
+  - Name: `replace_column`, storing the eta column `A^{-1} a_new` and the
+    replaced column position. In a simplex solver, `A` is the current basis
+    matrix `B`.
+  - Initial implementation: store product-form eta updates. This keeps the
+    update logic simple while the solve and transposed-solve APIs are still
+    being built out.
+- [x] Apply accumulated column replacements when solving basis systems.
+- [x] Apply accumulated column replacements in reverse order when solving
   transposed basis systems.
-- [ ] Report how many delayed basis updates are currently stored.
-  - Proposed name: `basis_update_count`.
+- [x] Report how many delayed basis updates are currently stored.
+  - Name: `update_count`.
 - [ ] Rebuild the sparse LU representation from the latest explicit basis when
   delayed updates become too expensive or inaccurate.
   - Proposed name: `refactor_basis`.
@@ -39,3 +43,6 @@ Fortran-style abbreviations.
 - [ ] Provide sparse right-hand-side solve paths for transposed basis systems.
 - [ ] Provide row/column access helpers for simplex pricing operations.
 - [ ] Add Forrest-Tomlin-style updates to reduce product-form update growth.
+  - Long-term direction: replace or supplement accumulated eta updates with a
+    Forrest-Tomlin representation once the product-form update path is correct
+    and covered by tests.

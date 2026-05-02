@@ -1,5 +1,6 @@
 //! LU decomposition with dynamic update for non-square sparse matrices.
 
+mod eta_update;
 mod initial_factorize;
 mod lower;
 mod solve;
@@ -10,6 +11,7 @@ mod upper;
 
 use ndarray::Array2;
 
+pub use eta_update::*;
 pub use initial_factorize::*;
 pub use lower::*;
 pub use upper::*;
@@ -22,6 +24,79 @@ pub use upper::*;
 /// $L$ is the product of unit triangle matrices which is not necessarily lower-triangular,
 /// and row and column permutations $P$ and $Q$ are managed to keep $PUQ$ upper-triangular or trapezoidal.
 ///
+/// Column replacement updates
+/// --------------------------
+///
+/// After the initial factorization, this type can represent later one-column
+/// replacements by accumulating product-form eta updates. If the represented
+/// matrix is currently $A_k$ and column $p$ is replaced by $a_{\mathrm{new}}$,
+/// first compute
+///
+/// $$
+/// d = A_k^{-1} a_{\mathrm{new}}.
+/// $$
+///
+/// Then the updated matrix can be written as
+///
+/// $$
+/// A_{k+1} = A_k E_k,
+/// $$
+///
+/// where $E_k$ is the identity matrix with its $p$-th column replaced by
+/// $d$:
+///
+/// $$
+/// E_k =
+/// \begin{bmatrix}
+/// e_0 & \cdots & d & \cdots & e_{n-1}
+/// \end{bmatrix}.
+/// $$
+///
+/// Therefore, after several updates,
+///
+/// $$
+/// A_k = A_0 E_0 E_1 \cdots E_{k-1}.
+/// $$
+///
+/// A call to [`LU::solve`] applies
+///
+/// $$
+/// A_k^{-1}
+/// = E_{k-1}^{-1} \cdots E_1^{-1} E_0^{-1} A_0^{-1}
+/// $$
+///
+/// without forming any inverse explicitly. For an eta column $d$ with pivot
+/// position $p$, applying $E^{-1}$ to a vector $v$ only needs that column:
+///
+/// $$
+/// t = \frac{v_p}{d_p},
+/// \qquad
+/// v_i \leftarrow v_i - d_i t \quad (i \ne p),
+/// \qquad
+/// v_p \leftarrow t.
+/// $$
+///
+/// A call to [`LU::solve_transposed`] applies the transpose-side updates in the
+/// opposite order:
+///
+/// $$
+/// A_k^{-T}
+/// = A_0^{-T} E_0^{-T} E_1^{-T} \cdots E_{k-1}^{-T}.
+/// $$
+///
+/// Applying $E^{-T}$ leaves non-pivot entries unchanged and updates the pivot
+/// entry as
+///
+/// $$
+/// v_p \leftarrow
+/// \frac{
+///     v_p - \sum_{i \ne p} d_i v_i
+/// }{d_p}.
+/// $$
+///
+/// This eta representation is the first update mechanism used by this crate.
+/// The long-term plan is to replace or supplement it with Forrest--Tomlin-style
+/// updates once the product-form update path is fully established.
 pub struct LU {
     nrows: usize,
     ncols: usize,
@@ -31,6 +106,7 @@ pub struct LU {
     p: Vec<usize>,
     /// Column permutation for $U$, keeping $PUQ$ upper-triangular or trapezoidal.
     q: Vec<usize>,
+    eta_updates: Vec<EtaUpdate>,
 }
 
 impl LU {
@@ -64,6 +140,14 @@ impl LU {
         &self.q
     }
 
+    pub fn eta_updates(&self) -> &[EtaUpdate] {
+        &self.eta_updates
+    }
+
+    pub fn update_count(&self) -> usize {
+        self.eta_updates.len()
+    }
+
     pub fn reconstruct(&self) -> Array2<f64> {
         let mut matrix = Array2::zeros((self.nrows, self.ncols));
         for (step, row) in self.u.rows().enumerate() {
@@ -76,6 +160,11 @@ impl LU {
             for entry_col in 0..self.ncols {
                 matrix[(row, entry_col)] += mu * pivot_row[entry_col];
             }
+        }
+        for eta_update in &self.eta_updates {
+            let column = eta_update.pivot();
+            let replacement = matrix.dot(eta_update.column());
+            matrix.column_mut(column).assign(&replacement);
         }
         matrix
     }
