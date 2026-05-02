@@ -130,7 +130,7 @@ impl StandardFormLp {
     /// For a basis index set $I = \{j_0, j_1, \ldots, j_{m-1}\}$, this returns
     /// $c_I = [c_{j_0}, c_{j_1}, \ldots, c_{j_{m-1}}]^T$.
     pub fn basis_costs(&self, basis: &Basis) -> Result<Array1<f64>, StandardFormError> {
-        self.basis_membership(basis)?;
+        self.basis_column_mask(basis)?;
         Ok(Array1::from_iter(
             basis.indices().iter().map(|&index| self.c[index]),
         ))
@@ -169,8 +169,8 @@ impl StandardFormLp {
     /// For the basis index set $I$, this returns the complement
     /// $\{0, 1, \ldots, n - 1\} \setminus I$ in ascending column order.
     pub fn nonbasis_indices(&self, basis: &Basis) -> Result<Vec<usize>, StandardFormError> {
-        let basis_membership = self.basis_membership(basis)?;
-        Ok(basis_membership
+        let basis_column_mask = self.basis_column_mask(basis)?;
+        Ok(basis_column_mask
             .iter()
             .enumerate()
             .filter_map(|(index, &is_basis)| (!is_basis).then_some(index))
@@ -192,7 +192,7 @@ impl StandardFormLp {
             .collect()
     }
 
-    fn basis_membership(&self, basis: &Basis) -> Result<Vec<bool>, StandardFormError> {
+    fn basis_column_mask(&self, basis: &Basis) -> Result<Vec<bool>, StandardFormError> {
         if basis.indices().len() != self.a.nrows() {
             return Err(StandardFormError::BasisDimensionMismatch {
                 expected: self.a.nrows(),
@@ -200,7 +200,7 @@ impl StandardFormLp {
             });
         }
 
-        let mut basis_membership = vec![false; self.a.ncols()];
+        let mut basis_column_mask = vec![false; self.a.ncols()];
         for &column in basis.indices() {
             if column >= self.a.ncols() {
                 return Err(StandardFormError::ColumnOutOfBounds {
@@ -208,9 +208,9 @@ impl StandardFormLp {
                     ncols: self.a.ncols(),
                 });
             }
-            basis_membership[column] = true;
+            basis_column_mask[column] = true;
         }
-        Ok(basis_membership)
+        Ok(basis_column_mask)
     }
 }
 
