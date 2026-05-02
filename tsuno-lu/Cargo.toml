@@ -6,3 +6,8 @@ edition.workspace = true
 repository.workspace = true
 
 [dependencies]
+katexit = "0.1.5"
+ndarray = { version = "0.16.1", features = ["approx"] }
+
+[dev-dependencies]
+approx = "0.5"
