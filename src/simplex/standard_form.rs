@@ -56,8 +56,14 @@ use super::{Basis, BasisError};
 /// r_j = c_j - A_j^T y.
 /// $$
 ///
+/// In a minimization problem, a nonbasis column with negative reduced cost can
+/// enter the basis. This type uses [`StandardFormLp::entering_column`] to pick
+/// the nonbasis column with the smallest reduced cost below a caller-provided
+/// tolerance.
+///
 /// These operations are exposed as [`StandardFormLp::basis_costs`],
-/// [`StandardFormLp::dual_variables`], and [`StandardFormLp::reduced_cost`].
+/// [`StandardFormLp::dual_variables`], [`StandardFormLp::reduced_cost`], and
+/// [`StandardFormLp::entering_column`].
 #[derive(Clone, Debug)]
 pub struct StandardFormLp {
     a: Array2<f64>,
@@ -190,6 +196,26 @@ impl StandardFormLp {
                     .map(|value| ReducedCost { column, value })
             })
             .collect()
+    }
+
+    /// Select an entering column from the nonbasis reduced costs.
+    ///
+    /// For this minimization problem, a nonbasis column $j \notin I$ is eligible
+    /// to enter the basis when $r_j < -\epsilon$, where `tolerance` is
+    /// $\epsilon$. This returns the eligible column with the smallest reduced
+    /// cost, or `None` when all nonbasis reduced costs are nonnegative within
+    /// the tolerance.
+    pub fn entering_column(
+        &self,
+        basis: &Basis,
+        tolerance: f64,
+    ) -> Result<Option<ReducedCost>, StandardFormError> {
+        let tolerance = tolerance.max(0.0);
+        Ok(self
+            .reduced_costs(basis)?
+            .into_iter()
+            .filter(|reduced_cost| reduced_cost.value < -tolerance)
+            .min_by(|left, right| left.value.total_cmp(&right.value)))
     }
 
     fn basis_column_mask(&self, basis: &Basis) -> Result<Vec<bool>, StandardFormError> {
@@ -368,6 +394,47 @@ mod tests {
     }
 
     #[test]
+    fn entering_column_selects_most_negative_reduced_cost() {
+        let lp = improving_slack_lp();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let entering_column = lp.entering_column(&basis, 1.0e-9).unwrap();
+
+        assert_eq!(
+            entering_column,
+            Some(ReducedCost {
+                column: 1,
+                value: -2.0
+            })
+        );
+    }
+
+    #[test]
+    fn entering_column_returns_none_when_reduced_costs_are_nonnegative() {
+        let lp = slack_lp();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let entering_column = lp.entering_column(&basis, 1.0e-9).unwrap();
+
+        assert_eq!(entering_column, None);
+    }
+
+    #[test]
+    fn entering_column_respects_tolerance() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![-1.0e-8, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let entering_column = lp.entering_column(&basis, 1.0e-7).unwrap();
+
+        assert_eq!(entering_column, None);
+    }
+
+    #[test]
     fn basis_costs_rejects_basis_dimension_mismatch() {
         let lp = example_lp();
         let other_matrix = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
@@ -438,6 +505,15 @@ mod tests {
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
             array![4.0, 3.0],
             array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap()
+    }
+
+    fn improving_slack_lp() -> StandardFormLp {
+        StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![-1.0, -2.0, 0.0, 0.0],
         )
         .unwrap()
     }
