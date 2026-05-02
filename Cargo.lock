@@ -194,7 +194,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tsuno-lu"
+name = "tsuno"
 version = "0.1.0"
 dependencies = [
  "approx",

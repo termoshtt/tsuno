@@ -1,9 +1,15 @@
-[workspace]
-members = ["tsuno-lu"]
-resolver = "3"
-
-[workspace.package]
+[package]
+name = "tsuno"
+readme = "README.md"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/termoshtt/tsuno"
+
+[dependencies]
+katexit = "0.1.5"
+ndarray = { version = "0.16.1", features = ["approx"] }
+
+[dev-dependencies]
+approx = "0.5"
+rand = "0.8"

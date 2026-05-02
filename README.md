@@ -1,10 +1,56 @@
 # tsuno
-Simplex-based LP solver/analyzer for advanced usages
+Simplex-based LP solver/analyzer for advanced usages.
 
-| crate | description |
-|---|---|
-| tsuno (WIP) | Simplex-based LP solver/analyzer for advanced usages. |
-| [tsuno-lu](./tsuno-lu/) | Sparse LU factorizer with update capabilities inspired by LUSOL. |
+## Modules
+
+- `tsuno::lu`: sparse LU factorization and eta-update linear algebra kernels
+  for revised simplex methods.
+
+## `tsuno::lu` Planned Features
+
+`tsuno::lu` provides the linear algebra kernel needed by a revised simplex
+method without explicitly forming the inverse of the basis matrix. The public
+API uses descriptive operation names instead of traditional Fortran-style
+abbreviations.
+
+- [x] Build an initial sparse LU representation from COO input.
+- [x] Build an initial sparse LU representation from a dense `ndarray`.
+- [x] Choose initial pivots with a Markowitz-style fill-in estimate.
+- [x] Store the nominal lower factor as a product of unit triangular
+  eliminations.
+- [x] Store the nominal upper factor as sparse pivot rows.
+- [x] Reconstruct the original matrix from the current initial factorization for
+  validation.
+- [x] Solve a linear system with the represented matrix.
+  - Name: `solve(&Array1<f64>) -> Array1<f64>`, for `A x = rhs`. In a simplex
+    solver, this is used with the current basis matrix `B`.
+- [x] Solve a transposed linear system with the represented matrix.
+  - Name: `solve_transposed(&Array1<f64>) -> Array1<f64>`, for
+    `A^T x = rhs`. In a simplex solver, this is used with the current basis
+    matrix `B`.
+- [x] Add a product-form basis column replacement.
+  - Name: `replace_column`, storing the eta column `A^{-1} a_new` and the
+    replaced column position. In a simplex solver, `A` is the current basis
+    matrix `B`.
+  - Initial implementation: store product-form eta updates. This keeps the
+    update logic simple while the solve and transposed-solve APIs are still
+    being built out.
+- [x] Apply accumulated column replacements when solving basis systems.
+- [x] Apply accumulated column replacements in reverse order when solving
+  transposed basis systems.
+- [x] Report how many delayed basis updates are currently stored.
+  - Name: `update_count`.
+- [ ] Rebuild the sparse LU representation from the latest explicit basis when
+  delayed updates become too expensive or inaccurate.
+  - Proposed name: `refactor_basis`.
+- [ ] Provide residual checks for basis solves and transposed basis solves.
+- [ ] Provide sparse right-hand-side solve paths for basis systems.
+- [ ] Provide sparse right-hand-side solve paths for transposed basis systems.
+- [ ] Provide row/column access helpers for simplex pricing operations.
+- [ ] Add Forrest-Tomlin-style updates to reduce product-form update growth.
+  - Long-term direction: replace or supplement accumulated eta updates with a
+    Forrest-Tomlin representation once the product-form update path is correct
+    and covered by tests.
 
 # License
 Copyright (c) 2026 Toshiki Teramura (@termoshtt)
