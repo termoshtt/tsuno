@@ -121,11 +121,19 @@ impl StandardFormLp {
         Array1::from_iter(basis.indices().iter().map(|&index| self.c[index]))
     }
 
+    /// Compute the dual variables for the given basis.
+    ///
+    /// For a basis matrix $B = A_I$ and basis cost vector $c_I$, this returns
+    /// $y$ satisfying $B^T y = c_I$, equivalently $y = B^{-T} c_I$.
     pub fn dual_variables(&self, basis: &Basis) -> Array1<f64> {
         let basis_costs = self.basis_costs(basis);
         basis.solve_transposed(&basis_costs)
     }
 
+    /// Compute the reduced cost of a column.
+    ///
+    /// Given dual variables $y$, this returns
+    /// $r_j = c_j - A_j^T y$ for the `j`-th column $A_j$.
     pub fn reduced_cost(
         &self,
         dual_variables: &Array1<f64>,
