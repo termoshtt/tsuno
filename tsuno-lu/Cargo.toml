@@ -7,3 +7,4 @@ repository.workspace = true
 
 [dependencies]
 katexit = "0.1.5"
+ndarray = "0.16.1"

@@ -4,6 +4,8 @@ mod initial_factorize;
 mod lower;
 mod upper;
 
+use ndarray::Array2;
+
 pub use initial_factorize::*;
 pub use lower::*;
 pub use upper::*;
@@ -17,6 +19,8 @@ pub use upper::*;
 /// and row and column permutations $P$ and $Q$ are managed to keep $PUQ$ upper-triangular or trapezoidal.
 ///
 pub struct LU {
+    nrows: usize,
+    ncols: usize,
     l: L,
     u: U,
     /// Row permutation for $U$, keeping $PUQ$ upper-triangular or trapezoidal.
@@ -49,5 +53,21 @@ impl LU {
 
     pub fn col_permutation(&self) -> &[usize] {
         &self.q
+    }
+
+    pub fn reconstruct(&self) -> Array2<f64> {
+        let mut matrix = Array2::zeros((self.nrows, self.ncols));
+        for (step, row) in self.u.rows().enumerate() {
+            for (col, value) in row {
+                matrix[(self.p[step], col)] = value;
+            }
+        }
+        for (mu, row, col) in self.l.units().collect::<Vec<_>>().into_iter().rev() {
+            let pivot_row = matrix.row(col).to_owned();
+            for entry_col in 0..self.ncols {
+                matrix[(row, entry_col)] += mu * pivot_row[entry_col];
+            }
+        }
+        matrix
     }
 }

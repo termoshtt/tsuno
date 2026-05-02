@@ -240,6 +240,8 @@ impl Worker {
             self.unit_factorize(row, col);
         }
         LU {
+            nrows: self.nrows,
+            ncols: self.ncols,
             l: L::from_units(self.l_units),
             u: U::from_rows(self.u_rows),
             p: self.p,
@@ -295,25 +297,9 @@ mod tests {
         assert_eq!(worker.choose_pivot(), Some((1, 0)));
     }
 
-    fn reconstruct(lu: &LU, nrows: usize, ncols: usize) -> Vec<Vec<f64>> {
-        let mut matrix = vec![vec![0.0; ncols]; nrows];
-        for (step, row) in lu.u().rows().enumerate() {
-            for (col, value) in row {
-                matrix[lu.row_permutation()[step]][col] = value;
-            }
-        }
-        for (mu, row, col) in lu.l().units().collect::<Vec<_>>().into_iter().rev() {
-            let pivot_row = matrix[col].clone();
-            for (entry, pivot_entry) in matrix[row].iter_mut().zip(pivot_row) {
-                *entry += mu * pivot_entry;
-            }
-        }
-        matrix
-    }
-
-    fn assert_matrix_approx_eq(actual: &[Vec<f64>], expected: &[Vec<f64>]) {
-        assert_eq!(actual.len(), expected.len());
-        for (actual_row, expected_row) in actual.iter().zip(expected) {
+    fn assert_matrix_approx_eq(actual: &ndarray::Array2<f64>, expected: &[Vec<f64>]) {
+        assert_eq!(actual.nrows(), expected.len());
+        for (actual_row, expected_row) in actual.rows().into_iter().zip(expected) {
             assert_eq!(actual_row.len(), expected_row.len());
             for (&actual, &expected) in actual_row.iter().zip(expected_row) {
                 assert!(
@@ -340,7 +326,7 @@ mod tests {
             .into_iter(),
         );
 
-        let reconstructed = reconstruct(&lu, 3, 3);
+        let reconstructed = lu.reconstruct();
 
         assert_matrix_approx_eq(
             &reconstructed,
@@ -367,7 +353,7 @@ mod tests {
             .into_iter(),
         );
 
-        let reconstructed = reconstruct(&lu, 3, 4);
+        let reconstructed = lu.reconstruct();
 
         assert_matrix_approx_eq(
             &reconstructed,
