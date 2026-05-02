@@ -54,8 +54,11 @@ impl LU {
 mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::array;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     use crate::LU;
+    use crate::test_support::{diagonally_dominant_matrix, vector};
 
     #[test]
     fn solve_transposed_solves_dense_rhs() {
@@ -79,6 +82,21 @@ mod tests {
         let solution = lu.solve_transposed(&rhs);
 
         assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+    }
+
+    #[test]
+    fn solve_transposed_handles_generated_matrices_with_different_sparsity() {
+        let mut rng = StdRng::seed_from_u64(300);
+        for density in [0.0, 0.1, 0.35, 0.7, 1.0] {
+            let matrix = diagonally_dominant_matrix(8, density, &mut rng);
+            let expected_solution = vector(8, &mut rng);
+            let rhs = matrix.t().dot(&expected_solution);
+            let lu = LU::from_dense(matrix);
+
+            let solution = lu.solve_transposed(&rhs);
+
+            assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+        }
     }
 
     #[test]

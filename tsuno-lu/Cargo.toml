@@ -11,3 +11,4 @@ ndarray = { version = "0.16.1", features = ["approx"] }
 
 [dev-dependencies]
 approx = "0.5"
+rand = "0.8"

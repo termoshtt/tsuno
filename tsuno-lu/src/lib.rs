@@ -4,6 +4,8 @@ mod initial_factorize;
 mod lower;
 mod solve;
 mod solve_transposed;
+#[cfg(test)]
+mod test_support;
 mod upper;
 
 use ndarray::Array2;
