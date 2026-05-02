@@ -164,7 +164,29 @@ impl Worker {
     }
 
     /// Perform the unit factorization step for the current `step`.
-    fn unit_factorize(&mut self) {
+    ///
+    /// Factorize current matrix
+    ///
+    /// ```text
+    /// i | a v  -- a is the pivot element, v is the rest of the pivot row
+    /// j | b w
+    /// ```
+    ///
+    /// into
+    ///
+    /// ```text
+    /// i | a v  
+    /// j | 0 w - μ v -- where μ = b / a
+    /// ```
+    ///
+    /// or
+    ///
+    /// ```text
+    /// i | a v - μ w -- where μ = a / b
+    /// j | 0 w
+    /// ```
+    ///
+    fn unit_factorize(&mut self, i: usize, j: usize) {
         todo!()
     }
 
