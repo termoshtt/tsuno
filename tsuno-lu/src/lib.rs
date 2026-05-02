@@ -60,16 +60,16 @@ impl LU {
         &self.q
     }
 
-    /// Solve a linear system with the represented basis matrix.
+    /// Solve a linear system with the represented matrix.
     ///
-    /// This computes `x` in `B x = rhs` using the initial sparse LU
-    /// factorization, without explicitly forming `B^{-1}`.
-    pub fn solve_basis_system(&self, rhs: &[f64]) -> Vec<f64> {
-        assert_basis_solve_ready(self);
+    /// This computes `x` in `A x = rhs` using the initial sparse LU
+    /// factorization, without explicitly forming `A^{-1}`.
+    pub fn solve(&self, rhs: &[f64]) -> Vec<f64> {
+        assert_solve_ready(self);
         assert_eq!(
             rhs.len(),
             self.nrows,
-            "right-hand side length must match the basis dimension"
+            "right-hand side length must match the matrix row dimension"
         );
 
         let mut transformed_rhs = rhs.to_vec();
@@ -118,12 +118,12 @@ impl LU {
     }
 }
 
-fn assert_basis_solve_ready(lu: &LU) {
-    assert_eq!(lu.nrows, lu.ncols, "basis solves require a square matrix");
+fn assert_solve_ready(lu: &LU) {
+    assert_eq!(lu.nrows, lu.ncols, "solve requires a square matrix");
     assert_eq!(
         lu.p.len(),
         lu.nrows,
-        "basis solves require a full-rank factorization"
+        "solve requires a full-rank factorization"
     );
 }
 
@@ -134,12 +134,12 @@ mod tests {
     use ndarray::array;
 
     #[test]
-    fn solve_basis_system_solves_dense_rhs() {
+    fn solve_solves_dense_rhs() {
         let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
         let rhs = vec![7.0, 14.0, 23.0];
         let lu = LU::from_dense(matrix.clone());
 
-        let solution = lu.solve_basis_system(&rhs);
+        let solution = lu.solve(&rhs);
         let reconstructed_rhs = matrix.dot(&ndarray::Array1::from_vec(solution));
 
         assert_abs_diff_eq!(
@@ -150,12 +150,12 @@ mod tests {
     }
 
     #[test]
-    fn solve_basis_system_handles_permuted_pivots() {
+    fn solve_handles_permuted_pivots() {
         let matrix = array![[0.0, 2.0, 0.0], [3.0, 0.0, 4.0], [0.0, 5.0, 6.0]];
         let rhs = vec![4.0, 23.0, 28.0];
         let lu = LU::from_dense(matrix.clone());
 
-        let solution = lu.solve_basis_system(&rhs);
+        let solution = lu.solve(&rhs);
         let reconstructed_rhs = matrix.dot(&ndarray::Array1::from_vec(solution));
 
         assert_abs_diff_eq!(
@@ -166,11 +166,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "basis solves require a square matrix")]
-    fn solve_basis_system_rejects_rectangular_matrix() {
+    #[should_panic(expected = "solve requires a square matrix")]
+    fn solve_rejects_rectangular_matrix() {
         let matrix = array![[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]];
         let lu = LU::from_dense(matrix);
 
-        lu.solve_basis_system(&[1.0, 2.0]);
+        lu.solve(&[1.0, 2.0]);
     }
 }
