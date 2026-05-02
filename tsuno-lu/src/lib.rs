@@ -4,7 +4,7 @@ mod initial_factorize;
 mod lower;
 mod upper;
 
-use ndarray::Array2;
+use ndarray::{Array1, Array2};
 
 pub use initial_factorize::*;
 pub use lower::*;
@@ -64,7 +64,7 @@ impl LU {
     ///
     /// This computes `x` in `A x = rhs` using the initial sparse LU
     /// factorization, without explicitly forming `A^{-1}`.
-    pub fn solve(&self, rhs: &[f64]) -> Vec<f64> {
+    pub fn solve(&self, rhs: &Array1<f64>) -> Array1<f64> {
         assert_solve_ready(self);
         assert_eq!(
             rhs.len(),
@@ -72,12 +72,12 @@ impl LU {
             "right-hand side length must match the matrix row dimension"
         );
 
-        let mut transformed_rhs = rhs.to_vec();
+        let mut transformed_rhs = rhs.to_owned();
         for (mu, row, col) in self.l.units() {
             transformed_rhs[row] -= mu * transformed_rhs[col];
         }
 
-        let mut pivot_rhs = vec![0.0; self.nrows];
+        let mut pivot_rhs = Array1::zeros(self.nrows);
         for (step, &row) in self.p.iter().enumerate() {
             pivot_rhs[step] = transformed_rhs[row];
         }
@@ -87,7 +87,7 @@ impl LU {
             .rows()
             .map(|row| row.collect::<Vec<_>>())
             .collect::<Vec<_>>();
-        let mut solution = vec![0.0; self.ncols];
+        let mut solution = Array1::zeros(self.ncols);
         for step in (0..pivot_rows.len()).rev() {
             let row = &pivot_rows[step];
             let (pivot_col, pivot) = row[0];
@@ -136,33 +136,25 @@ mod tests {
     #[test]
     fn solve_solves_dense_rhs() {
         let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
-        let rhs = vec![7.0, 14.0, 23.0];
+        let rhs = array![7.0, 14.0, 23.0];
         let lu = LU::from_dense(matrix.clone());
 
         let solution = lu.solve(&rhs);
-        let reconstructed_rhs = matrix.dot(&ndarray::Array1::from_vec(solution));
+        let reconstructed_rhs = matrix.dot(&solution);
 
-        assert_abs_diff_eq!(
-            reconstructed_rhs,
-            ndarray::Array1::from_vec(rhs),
-            epsilon = 1.0e-9
-        );
+        assert_abs_diff_eq!(reconstructed_rhs, rhs, epsilon = 1.0e-9);
     }
 
     #[test]
     fn solve_handles_permuted_pivots() {
         let matrix = array![[0.0, 2.0, 0.0], [3.0, 0.0, 4.0], [0.0, 5.0, 6.0]];
-        let rhs = vec![4.0, 23.0, 28.0];
+        let rhs = array![4.0, 23.0, 28.0];
         let lu = LU::from_dense(matrix.clone());
 
         let solution = lu.solve(&rhs);
-        let reconstructed_rhs = matrix.dot(&ndarray::Array1::from_vec(solution));
+        let reconstructed_rhs = matrix.dot(&solution);
 
-        assert_abs_diff_eq!(
-            reconstructed_rhs,
-            ndarray::Array1::from_vec(rhs),
-            epsilon = 1.0e-9
-        );
+        assert_abs_diff_eq!(reconstructed_rhs, rhs, epsilon = 1.0e-9);
     }
 
     #[test]
@@ -171,6 +163,6 @@ mod tests {
         let matrix = array![[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]];
         let lu = LU::from_dense(matrix);
 
-        lu.solve(&[1.0, 2.0]);
+        lu.solve(&array![1.0, 2.0]);
     }
 }

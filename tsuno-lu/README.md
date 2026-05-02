@@ -17,8 +17,8 @@ Fortran-style abbreviations.
 - [x] Reconstruct the original matrix from the current initial factorization for
   validation.
 - [x] Solve a linear system with the represented matrix.
-  - Name: `solve`, for `A x = rhs`. In a simplex solver, this is used with the
-    current basis matrix `B`.
+  - Name: `solve(&Array1<f64>) -> Array1<f64>`, for `A x = rhs`. In a simplex
+    solver, this is used with the current basis matrix `B`.
 - [ ] Solve a transposed linear system with the represented matrix.
   - Proposed name: `solve_transposed`, for `A^T x = rhs`. In a simplex solver,
     this is used with the current basis matrix `B`.
