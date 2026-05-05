@@ -197,18 +197,35 @@ impl RevisedSimplex {
         &self.options
     }
 
+    /// Compute the current basic solution values.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::basic_solution`].
+    /// See that method for the mathematical definition of the returned
+    /// $x_I = B^{-1} b$ vector.
     pub fn basic_solution(&self) -> Result<Array1<f64>, StandardFormError> {
         self.lp.basic_solution(&self.basis)
     }
 
+    /// Compute the dual variables for the current basis.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::dual_variables`].
+    /// See that method for the transposed basis system $B^T y = c_I$.
     pub fn dual_variables(&self) -> Result<Array1<f64>, StandardFormError> {
         self.lp.dual_variables(&self.basis)
     }
 
+    /// Compute reduced costs for all current nonbasis columns.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::reduced_costs`].
+    /// See that method for the definition of $r_j = c_j - A_j^T y$.
     pub fn reduced_costs(&self) -> Result<Vec<PricedColumn>, StandardFormError> {
         self.lp.reduced_costs(&self.basis)
     }
 
+    /// Select the entering column for the current basis.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::entering_column`]
+    /// using [`RevisedSimplexOptions::reduced_cost_tolerance`].
     pub fn entering_column(&self) -> Result<Option<PricedColumn>, StandardFormError> {
         self.lp
             .entering_column(&self.basis, self.options.reduced_cost_tolerance)
