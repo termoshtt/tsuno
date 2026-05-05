@@ -200,6 +200,17 @@ impl StandardFormLp {
 
     /// Select an entering column from the nonbasis reduced costs.
     ///
+    /// With the current basis $I$, a nonbasis variable $x_j$ has value zero.
+    /// If $x_j$ is increased by a small step $\theta > 0$ while preserving
+    /// feasibility through the basis variables, the objective changes by
+    ///
+    /// $$
+    /// c^T x(\theta) = c^T x(0) + \theta r_j.
+    /// $$
+    ///
+    /// Therefore, in a minimization problem, a negative reduced cost gives a
+    /// local improving direction.
+    ///
     /// For this minimization problem, a nonbasis column $j \notin I$ is eligible
     /// to enter the basis when $r_j < -\epsilon$, where `tolerance` is
     /// $\epsilon$. This returns the eligible column with the smallest reduced
