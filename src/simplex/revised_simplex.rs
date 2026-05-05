@@ -5,14 +5,48 @@ use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 #[derive(Clone, Debug)]
 pub struct RevisedSimplexOptions {
     pub reduced_cost_tolerance: f64,
+    pub pivot_tolerance: f64,
 }
 
 impl Default for RevisedSimplexOptions {
     fn default() -> Self {
         Self {
             reduced_cost_tolerance: 1.0e-9,
+            pivot_tolerance: 1.0e-9,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+/// Original column that leaves the basis in a pivoted simplex step.
+///
+/// The `column` field is the original column index in `A`, not the internal
+/// position inside the current ordered basis. The `step_length` field is the
+/// ratio-test value at that leaving column.
+pub struct LeavingColumn {
+    pub column: usize,
+    pub step_length: f64,
+}
+
+/// Internal leaving basis position selected by the ratio test.
+#[derive(Clone, Debug, PartialEq)]
+struct LeavingPosition {
+    position: usize,
+    step_length: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SimplexStep {
+    Optimal,
+    Unbounded {
+        entering: PricedColumn,
+        direction: Array1<f64>,
+    },
+    Pivoted {
+        entering: PricedColumn,
+        leaving: LeavingColumn,
+        direction: Array1<f64>,
+    },
 }
 
 #[katexit::katexit]
@@ -131,6 +165,64 @@ impl RevisedSimplex {
         self.lp
             .entering_column(&self.basis, self.options.reduced_cost_tolerance)
     }
+
+    pub fn step(&mut self) -> Result<SimplexStep, StandardFormError> {
+        let Some(entering) = self.entering_column()? else {
+            return Ok(SimplexStep::Optimal);
+        };
+
+        let basic_solution = self.basic_solution()?;
+        let direction = self.pivot_direction(entering.column)?;
+        let Some(leaving_position) =
+            leaving_position(&basic_solution, &direction, self.options.pivot_tolerance)
+        else {
+            return Ok(SimplexStep::Unbounded {
+                entering,
+                direction,
+            });
+        };
+
+        let leaving = LeavingColumn {
+            column: self.basis.indices()[leaving_position.position],
+            step_length: leaving_position.step_length,
+        };
+
+        let entering_column = self.lp.column(entering.column)?.to_owned();
+        self.basis
+            .replace_column(leaving_position.position, entering.column, &entering_column)
+            .map_err(StandardFormError::Basis)?;
+
+        Ok(SimplexStep::Pivoted {
+            entering,
+            leaving,
+            direction,
+        })
+    }
+
+    fn pivot_direction(&self, entering_column: usize) -> Result<Array1<f64>, StandardFormError> {
+        let column = self.lp.column(entering_column)?.to_owned();
+        Ok(self.basis.solve(&column))
+    }
+}
+
+fn leaving_position(
+    basic_solution: &Array1<f64>,
+    direction: &Array1<f64>,
+    tolerance: f64,
+) -> Option<LeavingPosition> {
+    let tolerance = tolerance.max(0.0);
+    basic_solution
+        .iter()
+        .zip(direction.iter())
+        .enumerate()
+        .filter(|(_, (_, direction_value))| **direction_value > tolerance)
+        .map(
+            |(position, (basic_value, direction_value))| LeavingPosition {
+                position,
+                step_length: *basic_value / *direction_value,
+            },
+        )
+        .min_by(|left, right| left.step_length.total_cmp(&right.step_length))
 }
 
 #[cfg(test)]
@@ -157,6 +249,7 @@ mod tests {
             vec![2, 3],
             RevisedSimplexOptions {
                 reduced_cost_tolerance: 1.0e-9,
+                ..RevisedSimplexOptions::default()
             },
         )
         .unwrap();
@@ -184,6 +277,7 @@ mod tests {
             vec![2, 3],
             RevisedSimplexOptions {
                 reduced_cost_tolerance: 1.0e-7,
+                ..RevisedSimplexOptions::default()
             },
         )
         .unwrap();
@@ -193,6 +287,69 @@ mod tests {
         assert_eq!(entering_column, None);
     }
 
+    #[test]
+    fn revised_simplex_step_reports_optimal_basis() {
+        let mut simplex = RevisedSimplex::new(slack_lp(), vec![2, 3]).unwrap();
+
+        let step = simplex.step().unwrap();
+
+        assert_eq!(step, SimplexStep::Optimal);
+        assert_eq!(simplex.basis().indices(), &[2, 3]);
+    }
+
+    #[test]
+    fn revised_simplex_step_pivots_basis() {
+        let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
+
+        let step = simplex.step().unwrap();
+
+        match step {
+            SimplexStep::Pivoted {
+                entering,
+                leaving,
+                direction,
+            } => {
+                assert_eq!(
+                    entering,
+                    PricedColumn {
+                        column: 1,
+                        reduced_cost: -2.0
+                    }
+                );
+                assert_eq!(leaving.column, 3);
+                assert_abs_diff_eq!(leaving.step_length, 3.0, epsilon = 1.0e-9);
+                assert_abs_diff_eq!(direction, array![0.0, 1.0], epsilon = 1.0e-9);
+            }
+            _ => panic!("expected a pivoted step"),
+        }
+        assert_eq!(simplex.basis().indices(), &[2, 1]);
+    }
+
+    #[test]
+    fn revised_simplex_step_reports_unbounded_direction() {
+        let mut simplex = RevisedSimplex::new(unbounded_lp(), vec![1]).unwrap();
+
+        let step = simplex.step().unwrap();
+
+        match step {
+            SimplexStep::Unbounded {
+                entering,
+                direction,
+            } => {
+                assert_eq!(
+                    entering,
+                    PricedColumn {
+                        column: 0,
+                        reduced_cost: -1.0
+                    }
+                );
+                assert_abs_diff_eq!(direction, array![-1.0], epsilon = 1.0e-9);
+            }
+            _ => panic!("expected an unbounded step"),
+        }
+        assert_eq!(simplex.basis().indices(), &[1]);
+    }
+
     fn improving_slack_lp() -> StandardFormLp {
         StandardFormLp::new(
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
@@ -200,6 +357,19 @@ mod tests {
             array![-1.0, -2.0, 0.0, 0.0],
         )
         .unwrap()
+    }
+
+    fn slack_lp() -> StandardFormLp {
+        StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap()
+    }
+
+    fn unbounded_lp() -> StandardFormLp {
+        StandardFormLp::new(array![[-1.0, 1.0]], array![1.0], array![-1.0, 0.0]).unwrap()
     }
 
     fn example_lp() -> StandardFormLp {
