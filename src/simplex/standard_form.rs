@@ -72,14 +72,14 @@ pub struct StandardFormLp {
 }
 
 #[katexit::katexit]
-/// Reduced cost of a single nonbasis column.
+/// A column together with its reduced cost.
 ///
-/// The `column` field is the original column index `j` in `A`, and `value` is
-/// the reduced cost $r_j = c_j - A_j^T y$.
+/// The `column` field is the original column index `j` in `A`, and
+/// `reduced_cost` is $r_j = c_j - A_j^T y$ for that column.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ReducedCost {
+pub struct PricedColumn {
     pub column: usize,
-    pub value: f64,
+    pub reduced_cost: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -187,13 +187,16 @@ impl StandardFormLp {
     ///
     /// This first computes the dual variables $y = B^{-T} c_I$, then returns
     /// $r_j = c_j - A_j^T y$ for every $j \notin I$.
-    pub fn reduced_costs(&self, basis: &Basis) -> Result<Vec<ReducedCost>, StandardFormError> {
+    pub fn reduced_costs(&self, basis: &Basis) -> Result<Vec<PricedColumn>, StandardFormError> {
         let dual_variables = self.dual_variables(basis)?;
         self.nonbasis_indices(basis)?
             .into_iter()
             .map(|column| {
                 self.reduced_cost(&dual_variables, column)
-                    .map(|value| ReducedCost { column, value })
+                    .map(|reduced_cost| PricedColumn {
+                        column,
+                        reduced_cost,
+                    })
             })
             .collect()
     }
@@ -220,13 +223,13 @@ impl StandardFormLp {
         &self,
         basis: &Basis,
         tolerance: f64,
-    ) -> Result<Option<ReducedCost>, StandardFormError> {
+    ) -> Result<Option<PricedColumn>, StandardFormError> {
         let tolerance = tolerance.max(0.0);
         Ok(self
             .reduced_costs(basis)?
             .into_iter()
-            .filter(|reduced_cost| reduced_cost.value < -tolerance)
-            .min_by(|left, right| left.value.total_cmp(&right.value)))
+            .filter(|priced_column| priced_column.reduced_cost < -tolerance)
+            .min_by(|left, right| left.reduced_cost.total_cmp(&right.reduced_cost)))
     }
 
     fn basis_column_mask(&self, basis: &Basis) -> Result<Vec<bool>, StandardFormError> {
@@ -392,13 +395,13 @@ mod tests {
         assert_eq!(
             reduced_costs,
             vec![
-                ReducedCost {
+                PricedColumn {
                     column: 0,
-                    value: 1.0
+                    reduced_cost: 1.0
                 },
-                ReducedCost {
+                PricedColumn {
                     column: 1,
-                    value: 2.0
+                    reduced_cost: 2.0
                 }
             ]
         );
@@ -413,9 +416,9 @@ mod tests {
 
         assert_eq!(
             entering_column,
-            Some(ReducedCost {
+            Some(PricedColumn {
                 column: 1,
-                value: -2.0
+                reduced_cost: -2.0
             })
         );
     }
