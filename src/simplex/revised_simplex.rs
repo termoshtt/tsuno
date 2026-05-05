@@ -75,7 +75,7 @@ impl Default for RevisedSimplexOptions {
 /// A leaving basis position $p$ is selected by the ratio test
 ///
 /// $$
-/// p \in \operatorname*{arg\,min}_{i:\ d_i > \epsilon}
+/// p \in \operatorname*{argmin}_{i:\ d_i > \epsilon}
 /// \frac{(x_I)_i}{d_i}.
 /// $$
 ///
