@@ -53,11 +53,20 @@ pub enum SimplexStep {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[katexit::katexit]
 /// Optimal solution returned by [`RevisedSimplex::solve`].
 ///
 /// The `primal` vector is the full decision vector `x`, including both basis
 /// and nonbasis components. Nonbasis components are zero in the returned basic
-/// solution.
+/// solution:
+///
+/// $$
+/// x_j = 0 \quad (j \notin I),
+/// \qquad
+/// x_I = B^{-1} b.
+/// $$
+///
+/// The objective value is $c^T x$.
 pub struct SimplexSolution {
     pub primal: Array1<f64>,
     pub objective_value: f64,
@@ -243,6 +252,26 @@ impl RevisedSimplex {
         Ok(self.basis.solve(&column))
     }
 
+    /// Repeatedly apply revised simplex steps until termination.
+    ///
+    /// Each iteration applies [`RevisedSimplex::step`]. If no nonbasis column
+    /// has reduced cost below the tolerance,
+    ///
+    /// $$
+    /// r_j \ge -\epsilon \quad (j \notin I),
+    /// $$
+    ///
+    /// the current basic solution is returned as optimal. If an entering
+    /// column $q$ exists but its direction
+    ///
+    /// $$
+    /// d = B^{-1} A_q
+    /// $$
+    ///
+    /// has no positive component above the pivot tolerance, the problem is
+    /// reported as unbounded in that direction. If neither condition occurs
+    /// before [`RevisedSimplexOptions::max_iterations`] step attempts, this
+    /// returns [`SimplexError::IterationLimit`].
     pub fn solve(&mut self) -> Result<SimplexSolveResult, SimplexError> {
         for iteration in 0..self.options.max_iterations {
             match self.step()? {
