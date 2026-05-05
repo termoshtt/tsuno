@@ -17,18 +17,22 @@ impl Default for RevisedSimplexOptions {
     }
 }
 
-#[katexit::katexit]
-/// Leaving basis position selected by the ratio test.
-///
-/// The `position` field is not an original column index of `A`. It is the
-/// position `p` inside the current ordered basis index set $I$, so
-/// `basis.indices()[position]` is the original column that leaves the basis.
-/// The `step_length` field is the ratio-test value
-/// $(x_I)_p / d_p$ at that position.
 #[derive(Clone, Debug, PartialEq)]
-pub struct LeavingPosition {
-    pub position: usize,
+/// Original column that leaves the basis in a pivoted simplex step.
+///
+/// The `column` field is the original column index in `A`, not the internal
+/// position inside the current ordered basis. The `step_length` field is the
+/// ratio-test value at that leaving column.
+pub struct LeavingColumn {
+    pub column: usize,
     pub step_length: f64,
+}
+
+/// Internal leaving basis position selected by the ratio test.
+#[derive(Clone, Debug, PartialEq)]
+struct LeavingPosition {
+    position: usize,
+    step_length: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -40,7 +44,7 @@ pub enum SimplexStep {
     },
     Pivoted {
         entering: PricedColumn,
-        leaving: LeavingPosition,
+        leaving: LeavingColumn,
         direction: Array1<f64>,
     },
 }
@@ -169,7 +173,7 @@ impl RevisedSimplex {
 
         let basic_solution = self.basic_solution()?;
         let direction = self.pivot_direction(entering.column)?;
-        let Some(leaving) =
+        let Some(leaving_position) =
             leaving_position(&basic_solution, &direction, self.options.pivot_tolerance)
         else {
             return Ok(SimplexStep::Unbounded {
@@ -178,9 +182,14 @@ impl RevisedSimplex {
             });
         };
 
+        let leaving = LeavingColumn {
+            column: self.basis.indices()[leaving_position.position],
+            step_length: leaving_position.step_length,
+        };
+
         let entering_column = self.lp.column(entering.column)?.to_owned();
         self.basis
-            .replace_column(leaving.position, entering.column, &entering_column)
+            .replace_column(leaving_position.position, entering.column, &entering_column)
             .map_err(StandardFormError::Basis)?;
 
         Ok(SimplexStep::Pivoted {
@@ -307,7 +316,7 @@ mod tests {
                         reduced_cost: -2.0
                     }
                 );
-                assert_eq!(leaving.position, 1);
+                assert_eq!(leaving.column, 3);
                 assert_abs_diff_eq!(leaving.step_length, 3.0, epsilon = 1.0e-9);
                 assert_abs_diff_eq!(direction, array![0.0, 1.0], epsilon = 1.0e-9);
             }
