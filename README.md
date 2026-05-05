@@ -93,11 +93,14 @@ the revised simplex iteration loop.
 - [x] Represent the current revised simplex state.
   - Name: `RevisedSimplex`, owning `StandardFormLp`, the current `Basis`, and
     simplex options.
-- [ ] Compute a pivot direction for an entering column.
-  - Proposed name: `pivot_direction`, returning `d = B^{-1} A_q`.
-- [ ] Select a leaving basis position with a ratio test.
-- [ ] Apply one primal simplex pivot by updating the basis and bookkeeping.
-- [ ] Represent iteration outcomes such as optimal, unbounded, and pivoted.
+- [x] Compute a pivot direction for an entering column.
+  - Internal operation in `RevisedSimplex::step`, computing `d = B^{-1} A_q`.
+- [x] Select a leaving basis position with a ratio test.
+  - Internal operation in `RevisedSimplex::step`.
+- [x] Apply one primal simplex pivot by updating the basis and bookkeeping.
+  - Name: `RevisedSimplex::step`.
+- [x] Represent iteration outcomes such as optimal, unbounded, and pivoted.
+  - Name: `SimplexStep`.
 - [ ] Implement Phase I or another explicit feasible-basis construction path.
 
 # License
