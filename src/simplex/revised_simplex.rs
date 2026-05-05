@@ -40,6 +40,48 @@ impl Default for RevisedSimplexOptions {
 /// \qquad
 /// r_j = c_j - A_j^T y.
 /// $$
+///
+/// A primal revised simplex step is organized around these quantities. First,
+/// compute the current basic solution
+///
+/// $$
+/// x_I = B^{-1} b,
+/// \qquad
+/// x_j = 0 \quad (j \notin I).
+/// $$
+///
+/// Then compute the dual variables and reduced costs
+///
+/// $$
+/// B^T y = c_I,
+/// \qquad
+/// r_j = c_j - A_j^T y \quad (j \notin I).
+/// $$
+///
+/// For minimization, if every nonbasis reduced cost satisfies
+///
+/// $$
+/// r_j \ge -\epsilon,
+/// $$
+///
+/// the current basis is treated as optimal within tolerance. Otherwise choose
+/// an entering column $q$ with negative reduced cost. The corresponding pivot
+/// direction is
+///
+/// $$
+/// d = B^{-1} A_q.
+/// $$
+///
+/// A leaving basis position $p$ is selected by the ratio test
+///
+/// $$
+/// p \in \operatorname*{arg\,min}_{i:\ d_i > \epsilon}
+/// \frac{(x_I)_i}{d_i}.
+/// $$
+///
+/// If no such $i$ exists, the problem is unbounded along the entering
+/// direction. Otherwise the basis is updated by replacing the $p$-th basis
+/// column with $q$.
 #[derive(Debug)]
 pub struct RevisedSimplex {
     lp: StandardFormLp,
