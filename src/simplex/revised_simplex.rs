@@ -17,6 +17,14 @@ impl Default for RevisedSimplexOptions {
     }
 }
 
+#[katexit::katexit]
+/// Leaving basis position selected by the ratio test.
+///
+/// The `position` field is not an original column index of `A`. It is the
+/// position `p` inside the current ordered basis index set $I$, so
+/// `basis.indices()[position]` is the original column that leaves the basis.
+/// The `step_length` field is the ratio-test value
+/// $(x_I)_p / d_p$ at that position.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeavingPosition {
     pub position: usize,
