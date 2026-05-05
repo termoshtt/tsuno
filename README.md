@@ -85,7 +85,9 @@ the revised simplex iteration loop.
   - Name: `StandardFormLp::nonbasis_indices`.
 - [x] Compute reduced costs for all nonbasis columns.
   - Name: `StandardFormLp::reduced_costs`.
-- [ ] Select an entering column from reduced costs.
+- [x] Select an entering column from reduced costs.
+  - Name: `StandardFormLp::entering_column`, returning the most negative
+    nonbasis reduced cost below a tolerance.
 - [ ] Compute the current basic solution.
   - Proposed name: `basic_solution`, returning `x_I = B^{-1} b`.
 - [ ] Compute a pivot direction for an entering column.

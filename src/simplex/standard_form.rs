@@ -56,8 +56,14 @@ use super::{Basis, BasisError};
 /// r_j = c_j - A_j^T y.
 /// $$
 ///
+/// In a minimization problem, a nonbasis column with negative reduced cost can
+/// enter the basis. This type uses [`StandardFormLp::entering_column`] to pick
+/// the nonbasis column with the smallest reduced cost below a caller-provided
+/// tolerance.
+///
 /// These operations are exposed as [`StandardFormLp::basis_costs`],
-/// [`StandardFormLp::dual_variables`], and [`StandardFormLp::reduced_cost`].
+/// [`StandardFormLp::dual_variables`], [`StandardFormLp::reduced_cost`], and
+/// [`StandardFormLp::entering_column`].
 #[derive(Clone, Debug)]
 pub struct StandardFormLp {
     a: Array2<f64>,
@@ -66,14 +72,14 @@ pub struct StandardFormLp {
 }
 
 #[katexit::katexit]
-/// Reduced cost of a single nonbasis column.
+/// A column together with its reduced cost.
 ///
-/// The `column` field is the original column index `j` in `A`, and `value` is
-/// the reduced cost $r_j = c_j - A_j^T y$.
+/// The `column` field is the original column index `j` in `A`, and
+/// `reduced_cost` is $r_j = c_j - A_j^T y$ for that column.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ReducedCost {
+pub struct PricedColumn {
     pub column: usize,
-    pub value: f64,
+    pub reduced_cost: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -181,15 +187,49 @@ impl StandardFormLp {
     ///
     /// This first computes the dual variables $y = B^{-T} c_I$, then returns
     /// $r_j = c_j - A_j^T y$ for every $j \notin I$.
-    pub fn reduced_costs(&self, basis: &Basis) -> Result<Vec<ReducedCost>, StandardFormError> {
+    pub fn reduced_costs(&self, basis: &Basis) -> Result<Vec<PricedColumn>, StandardFormError> {
         let dual_variables = self.dual_variables(basis)?;
         self.nonbasis_indices(basis)?
             .into_iter()
             .map(|column| {
                 self.reduced_cost(&dual_variables, column)
-                    .map(|value| ReducedCost { column, value })
+                    .map(|reduced_cost| PricedColumn {
+                        column,
+                        reduced_cost,
+                    })
             })
             .collect()
+    }
+
+    /// Select an entering column from the nonbasis reduced costs.
+    ///
+    /// With the current basis $I$, a nonbasis variable $x_j$ has value zero.
+    /// If $x_j$ is increased by a small step $\theta > 0$ while preserving
+    /// feasibility through the basis variables, the objective changes by
+    ///
+    /// $$
+    /// c^T x(\theta) = c^T x(0) + \theta r_j.
+    /// $$
+    ///
+    /// Therefore, in a minimization problem, a negative reduced cost gives a
+    /// local improving direction.
+    ///
+    /// For this minimization problem, a nonbasis column $j \notin I$ is eligible
+    /// to enter the basis when $r_j < -\epsilon$, where `tolerance` is
+    /// $\epsilon$. This returns the eligible column with the smallest reduced
+    /// cost, or `None` when all nonbasis reduced costs are nonnegative within
+    /// the tolerance.
+    pub fn entering_column(
+        &self,
+        basis: &Basis,
+        tolerance: f64,
+    ) -> Result<Option<PricedColumn>, StandardFormError> {
+        let tolerance = tolerance.max(0.0);
+        Ok(self
+            .reduced_costs(basis)?
+            .into_iter()
+            .filter(|priced_column| priced_column.reduced_cost < -tolerance)
+            .min_by(|left, right| left.reduced_cost.total_cmp(&right.reduced_cost)))
     }
 
     fn basis_column_mask(&self, basis: &Basis) -> Result<Vec<bool>, StandardFormError> {
@@ -355,16 +395,57 @@ mod tests {
         assert_eq!(
             reduced_costs,
             vec![
-                ReducedCost {
+                PricedColumn {
                     column: 0,
-                    value: 1.0
+                    reduced_cost: 1.0
                 },
-                ReducedCost {
+                PricedColumn {
                     column: 1,
-                    value: 2.0
+                    reduced_cost: 2.0
                 }
             ]
         );
+    }
+
+    #[test]
+    fn entering_column_selects_most_negative_reduced_cost() {
+        let lp = improving_slack_lp();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let entering_column = lp.entering_column(&basis, 1.0e-9).unwrap();
+
+        assert_eq!(
+            entering_column,
+            Some(PricedColumn {
+                column: 1,
+                reduced_cost: -2.0
+            })
+        );
+    }
+
+    #[test]
+    fn entering_column_returns_none_when_reduced_costs_are_nonnegative() {
+        let lp = slack_lp();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let entering_column = lp.entering_column(&basis, 1.0e-9).unwrap();
+
+        assert_eq!(entering_column, None);
+    }
+
+    #[test]
+    fn entering_column_respects_tolerance() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![-1.0e-8, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let basis = lp.basis(vec![2, 3]).unwrap();
+
+        let entering_column = lp.entering_column(&basis, 1.0e-7).unwrap();
+
+        assert_eq!(entering_column, None);
     }
 
     #[test]
@@ -438,6 +519,15 @@ mod tests {
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
             array![4.0, 3.0],
             array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap()
+    }
+
+    fn improving_slack_lp() -> StandardFormLp {
+        StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![-1.0, -2.0, 0.0, 0.0],
         )
         .unwrap()
     }
