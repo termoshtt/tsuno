@@ -61,9 +61,9 @@ use super::{Basis, BasisError};
 /// the nonbasis column with the smallest reduced cost below a caller-provided
 /// tolerance.
 ///
-/// These operations are exposed as [`StandardFormLp::basis_costs`],
-/// [`StandardFormLp::dual_variables`], [`StandardFormLp::reduced_cost`], and
-/// [`StandardFormLp::entering_column`].
+/// These operations are exposed as [`StandardFormLp::basic_solution`],
+/// [`StandardFormLp::basis_costs`], [`StandardFormLp::dual_variables`],
+/// [`StandardFormLp::reduced_cost`], and [`StandardFormLp::entering_column`].
 #[derive(Clone, Debug)]
 pub struct StandardFormLp {
     a: Array2<f64>,
@@ -129,6 +129,17 @@ impl StandardFormLp {
 
     pub fn basis(&self, indices: Vec<usize>) -> Result<Basis, StandardFormError> {
         Basis::new(&self.a, indices).map_err(StandardFormError::Basis)
+    }
+
+    /// Compute the current basic solution values.
+    ///
+    /// For a basis matrix $B = A_I$, the basic variables satisfy $B x_I = b$.
+    /// This returns $x_I = B^{-1} b$ in the same order as [`Basis::indices`].
+    /// Nonbasis variables are not included here and have value zero in the
+    /// corresponding full basic solution.
+    pub fn basic_solution(&self, basis: &Basis) -> Result<Array1<f64>, StandardFormError> {
+        self.basis_column_mask(basis)?;
+        Ok(basis.solve(&self.b))
     }
 
     /// Return the basis cost vector.
@@ -341,6 +352,16 @@ mod tests {
     }
 
     #[test]
+    fn basic_solution_solves_basis_system() {
+        let lp = example_lp();
+        let basis = lp.basis(vec![0, 1]).unwrap();
+
+        let basic_solution = lp.basic_solution(&basis).unwrap();
+
+        assert_abs_diff_eq!(basic_solution, array![0.4, 0.2], epsilon = 1.0e-9);
+    }
+
+    #[test]
     fn basis_costs_extracts_basis_cost_vector() {
         let lp = example_lp();
         let basis = lp.basis(vec![0, 1]).unwrap();
@@ -455,6 +476,23 @@ mod tests {
         let basis = Basis::new(&other_matrix, vec![0, 1, 2]).unwrap();
 
         let error = lp.basis_costs(&basis).unwrap_err();
+
+        assert_eq!(
+            error,
+            StandardFormError::BasisDimensionMismatch {
+                expected: 2,
+                actual: 3
+            }
+        );
+    }
+
+    #[test]
+    fn basic_solution_rejects_basis_dimension_mismatch() {
+        let lp = example_lp();
+        let other_matrix = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let basis = Basis::new(&other_matrix, vec![0, 1, 2]).unwrap();
+
+        let error = lp.basic_solution(&basis).unwrap_err();
 
         assert_eq!(
             error,

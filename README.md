@@ -88,8 +88,11 @@ the revised simplex iteration loop.
 - [x] Select an entering column from reduced costs.
   - Name: `StandardFormLp::entering_column`, returning the most negative
     nonbasis reduced cost below a tolerance.
-- [ ] Compute the current basic solution.
-  - Proposed name: `basic_solution`, returning `x_I = B^{-1} b`.
+- [x] Compute the current basic solution.
+  - Name: `StandardFormLp::basic_solution`, returning `x_I = B^{-1} b`.
+- [x] Represent the current revised simplex state.
+  - Name: `RevisedSimplex`, owning `StandardFormLp`, the current `Basis`, and
+    simplex options.
 - [ ] Compute a pivot direction for an entering column.
   - Proposed name: `pivot_direction`, returning `d = B^{-1} A_q`.
 - [ ] Select a leaving basis position with a ratio test.
