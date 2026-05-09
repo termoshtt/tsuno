@@ -2,6 +2,7 @@ use approx::assert_abs_diff_eq;
 use ndarray::array;
 
 use super::*;
+use crate::simplex::NoTrace;
 use crate::simplex::StandardFormLp;
 
 #[test]
@@ -126,7 +127,7 @@ fn revised_simplex_step_reports_unbounded_direction() {
 fn revised_simplex_solve_returns_optimal_solution() {
     let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
 
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut NoTrace).unwrap();
 
     match result {
         SimplexSolveResult::Optimal(solution) => {
@@ -147,7 +148,7 @@ fn revised_simplex_solve_returns_optimal_solution() {
 fn revised_simplex_solve_returns_unbounded_result() {
     let mut simplex = RevisedSimplex::new(unbounded_lp(), vec![1]).unwrap();
 
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut NoTrace).unwrap();
 
     match result {
         SimplexSolveResult::Unbounded {
@@ -181,7 +182,7 @@ fn revised_simplex_solve_returns_iteration_limit_solution() {
     )
     .unwrap();
 
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut NoTrace).unwrap();
 
     match result {
         SimplexSolveResult::IterationLimit(solution) => {
@@ -211,14 +212,14 @@ fn revised_simplex_can_continue_after_iteration_limit() {
     .unwrap();
 
     assert!(matches!(
-        simplex.solve().unwrap(),
+        simplex.solve(&mut NoTrace).unwrap(),
         SimplexSolveResult::IterationLimit(_)
     ));
     assert!(matches!(
-        simplex.solve().unwrap(),
+        simplex.solve(&mut NoTrace).unwrap(),
         SimplexSolveResult::IterationLimit(_)
     ));
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut NoTrace).unwrap();
 
     match result {
         SimplexSolveResult::Optimal(solution) => {
@@ -238,7 +239,7 @@ fn revised_simplex_solve_trace_snapshot() {
     let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
     let mut trace = FullTrace::default();
 
-    let result = simplex.solve_with_trace(&mut trace).unwrap();
+    let result = simplex.solve(&mut trace).unwrap();
 
     assert!(matches!(result, SimplexSolveResult::Optimal(_)));
     insta::assert_snapshot!(trace);

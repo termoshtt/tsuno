@@ -322,11 +322,7 @@ impl RevisedSimplex {
     /// That result is deliberately distinct from [`SimplexSolveResult::Optimal`]:
     /// the solver has a valid current basis and solution, but has not proved
     /// optimality.
-    pub fn solve(&mut self) -> Result<SimplexSolveResult, SimplexError> {
-        self.solve_with_trace(&mut NoTrace)
-    }
-
-    pub fn solve_with_trace(
+    pub fn solve(
         &mut self,
         trace: &mut impl SimplexTrace,
     ) -> Result<SimplexSolveResult, SimplexError> {

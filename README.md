@@ -107,7 +107,7 @@ the revised simplex iteration loop.
   - Names: `SimplexSolveResult` and `SimplexSolution`.
 - [x] Implement Phase I feasible-basis construction.
   - Name: `find_feasible_basis`, building and solving an auxiliary LP with
-    artificial variables.
+    artificial variables with caller-provided options and trace output.
 - [x] Provide a top-level standard-form solve path that does not require callers
   to provide an initial basis.
   - Name: `solve`, running Phase I first and then Phase II primal simplex with
