@@ -356,7 +356,7 @@ mod tests {
         let result = solve(
             feasible_lp_without_slack_basis(),
             RevisedSimplexOptions {
-                max_iterations: 0,
+                max_iterations: 1,
                 ..RevisedSimplexOptions::default()
             },
             &mut trace,
@@ -365,10 +365,10 @@ mod tests {
 
         match result {
             SimplexResult::PhaseOneIterationLimit(limit) => {
-                assert_eq!(limit.auxiliary_solution.basis_indices, vec![3, 4]);
+                assert_eq!(limit.auxiliary_solution.basis_indices, vec![3, 0]);
                 assert_abs_diff_eq!(
                     limit.auxiliary_solution.objective_value,
-                    1.25,
+                    0.75,
                     epsilon = 1.0e-9
                 );
             }
