@@ -1,6 +1,6 @@
 ---
 source: src/simplex/revised_simplex.rs
-expression: "trace.finish()"
+expression: trace
 ---
 iteration 0
 basis before: [2, 3]
