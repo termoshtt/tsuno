@@ -1,0 +1,10 @@
+---
+source: src/simplex/revised_simplex/tests.rs
+expression: trace
+---
+iteration 0
+basis before: [1]
+outcome: unbounded
+entering column: 0 (reduced_cost: -1)
+direction: [-1]
+basis after: [1]

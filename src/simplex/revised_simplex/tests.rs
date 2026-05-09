@@ -125,8 +125,9 @@ fn revised_simplex_step_reports_unbounded_direction() {
 #[test]
 fn revised_simplex_solve_returns_optimal_solution() {
     let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
+    let mut trace = FullTrace::default();
 
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut trace).unwrap();
 
     match result {
         SimplexSolveResult::Optimal(solution) => {
@@ -141,13 +142,15 @@ fn revised_simplex_solve_returns_optimal_solution() {
         }
         _ => panic!("expected an optimal solution"),
     }
+    insta::assert_snapshot!(trace);
 }
 
 #[test]
 fn revised_simplex_solve_returns_unbounded_result() {
     let mut simplex = RevisedSimplex::new(unbounded_lp(), vec![1]).unwrap();
+    let mut trace = FullTrace::default();
 
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut trace).unwrap();
 
     match result {
         SimplexSolveResult::Unbounded {
@@ -167,6 +170,7 @@ fn revised_simplex_solve_returns_unbounded_result() {
         }
         _ => panic!("expected an unbounded result"),
     }
+    insta::assert_snapshot!(trace);
 }
 
 #[test]
@@ -180,8 +184,9 @@ fn revised_simplex_solve_returns_iteration_limit_solution() {
         },
     )
     .unwrap();
+    let mut trace = FullTrace::default();
 
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut trace).unwrap();
 
     match result {
         SimplexSolveResult::IterationLimit(solution) => {
@@ -196,6 +201,7 @@ fn revised_simplex_solve_returns_iteration_limit_solution() {
         }
         _ => panic!("expected an iteration-limit solution"),
     }
+    insta::assert_snapshot!(trace);
 }
 
 #[test]
@@ -209,16 +215,17 @@ fn revised_simplex_can_continue_after_iteration_limit() {
         },
     )
     .unwrap();
+    let mut trace = FullTrace::default();
 
     assert!(matches!(
-        simplex.solve().unwrap(),
+        simplex.solve(&mut trace).unwrap(),
         SimplexSolveResult::IterationLimit(_)
     ));
     assert!(matches!(
-        simplex.solve().unwrap(),
+        simplex.solve(&mut trace).unwrap(),
         SimplexSolveResult::IterationLimit(_)
     ));
-    let result = simplex.solve().unwrap();
+    let result = simplex.solve(&mut trace).unwrap();
 
     match result {
         SimplexSolveResult::Optimal(solution) => {
@@ -231,16 +238,6 @@ fn revised_simplex_can_continue_after_iteration_limit() {
         }
         _ => panic!("expected continuation to reach optimality"),
     }
-}
-
-#[test]
-fn revised_simplex_solve_trace_snapshot() {
-    let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
-    let mut trace = FullTrace::default();
-
-    let result = simplex.solve_with_trace(&mut trace).unwrap();
-
-    assert!(matches!(result, SimplexSolveResult::Optimal(_)));
     insta::assert_snapshot!(trace);
 }
 

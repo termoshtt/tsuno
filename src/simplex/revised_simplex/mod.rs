@@ -2,8 +2,10 @@ use ndarray::Array1;
 
 use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
+mod phase_one;
 mod trace;
 
+pub use phase_one::*;
 pub use trace::*;
 
 #[derive(Clone, Debug)]
@@ -91,13 +93,99 @@ pub enum SimplexSolveResult {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Outcome of solving a standard-form LP from an automatically constructed
+/// initial basis.
+pub enum SimplexResult {
+    Optimal(SimplexSolution),
+    IterationLimit(SimplexSolution),
+    PhaseOneIterationLimit(PhaseOneIterationLimit),
+    Infeasible(PhaseOneInfeasible),
+    Unbounded {
+        entering: PricedColumn,
+        direction: Array1<f64>,
+        iterations: usize,
+    },
+}
+
+impl From<SimplexSolveResult> for SimplexResult {
+    fn from(result: SimplexSolveResult) -> Self {
+        match result {
+            SimplexSolveResult::Optimal(solution) => SimplexResult::Optimal(solution),
+            SimplexSolveResult::IterationLimit(solution) => SimplexResult::IterationLimit(solution),
+            SimplexSolveResult::Unbounded {
+                entering,
+                direction,
+                iterations,
+            } => SimplexResult::Unbounded {
+                entering,
+                direction,
+                iterations,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum SimplexError {
     Problem(StandardFormError),
+    PhaseOne(PhaseOneError),
 }
 
 impl From<StandardFormError> for SimplexError {
     fn from(error: StandardFormError) -> Self {
         SimplexError::Problem(error)
+    }
+}
+
+impl From<PhaseOneError> for SimplexError {
+    fn from(error: PhaseOneError) -> Self {
+        SimplexError::PhaseOne(error)
+    }
+}
+
+#[katexit::katexit]
+/// Solve a standard-form LP with a Phase I feasible-basis construction.
+///
+/// This is the top-level primal simplex entry point for
+///
+/// $$
+/// \min c^T x
+/// \quad \text{s.t.} \quad
+/// A x = b,\quad x \ge 0.
+/// $$
+///
+/// It first solves the Phase I auxiliary problem
+///
+/// $$
+/// \min \mathbf{1}^T w
+/// \quad \text{s.t.} \quad
+/// D A x + w = D b,\quad x,w \ge 0,
+/// $$
+///
+/// where $D$ is a diagonal row-sign matrix chosen so that $D b \ge 0$.
+/// If the Phase I optimum is positive, the original LP is infeasible. If it is
+/// zero, the resulting feasible original basis is used to start Phase II.
+///
+/// The top-level solver exposes one full-featured entry point. Pass
+/// [`RevisedSimplexOptions::default`] for default tolerances and iteration
+/// limits, and pass [`NoTrace`] when no trace collection is needed.
+pub fn solve(
+    lp: StandardFormLp,
+    options: RevisedSimplexOptions,
+    trace: &mut impl SimplexTrace,
+) -> Result<SimplexResult, SimplexError> {
+    match PhaseOneAuxiliaryProblem::new(&lp).solve(options.clone(), trace)? {
+        phase_one::PhaseOneResult::Feasible { basis_indices } => {
+            let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
+            trace.phase_started(SimplexTracePhase::PhaseTwo);
+            simplex.solve(trace).map(SimplexResult::from)
+        }
+        phase_one::PhaseOneResult::Infeasible(infeasible) => {
+            Ok(SimplexResult::Infeasible(infeasible))
+        }
+        phase_one::PhaseOneResult::IterationLimit(limit) => {
+            Ok(SimplexResult::PhaseOneIterationLimit(limit))
+        }
     }
 }
 
@@ -298,11 +386,7 @@ impl RevisedSimplex {
     /// That result is deliberately distinct from [`SimplexSolveResult::Optimal`]:
     /// the solver has a valid current basis and solution, but has not proved
     /// optimality.
-    pub fn solve(&mut self) -> Result<SimplexSolveResult, SimplexError> {
-        self.solve_with_trace(&mut NoTrace)
-    }
-
-    pub fn solve_with_trace(
+    pub fn solve(
         &mut self,
         trace: &mut impl SimplexTrace,
     ) -> Result<SimplexSolveResult, SimplexError> {
