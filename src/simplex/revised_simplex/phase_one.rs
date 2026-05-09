@@ -14,6 +14,16 @@ pub struct PhaseOneInfeasible {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Iteration limit reached while solving the Phase I auxiliary problem.
+///
+/// The contained solution belongs to the auxiliary problem, not to the original
+/// LP. It may contain positive artificial variables, so it must not be treated
+/// as a feasible solution of the original problem.
+pub struct PhaseOneIterationLimit {
+    pub auxiliary_solution: SimplexSolution,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 /// Errors that prevent extracting an original feasible basis from Phase I.
 pub enum PhaseOneError {
     NoOriginalFeasibleBasis,
@@ -24,7 +34,7 @@ pub enum PhaseOneError {
 enum PhaseOneResult {
     Feasible { basis_indices: Vec<usize> },
     Infeasible(PhaseOneInfeasible),
-    IterationLimit(SimplexSolution),
+    IterationLimit(PhaseOneIterationLimit),
 }
 
 #[derive(Clone, Debug)]
@@ -128,7 +138,9 @@ impl PhaseOneAuxiliaryProblem {
                 Ok(PhaseOneResult::Feasible { basis_indices })
             }
             SimplexSolveResult::IterationLimit(solution) => {
-                Ok(PhaseOneResult::IterationLimit(solution))
+                Ok(PhaseOneResult::IterationLimit(PhaseOneIterationLimit {
+                    auxiliary_solution: solution,
+                }))
             }
             SimplexSolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
         }
@@ -421,9 +433,13 @@ mod tests {
         .unwrap();
 
         match result {
-            SimplexResult::PhaseOneIterationLimit(solution) => {
-                assert_eq!(solution.basis_indices, vec![3, 4]);
-                assert_abs_diff_eq!(solution.objective_value, 1.25, epsilon = 1.0e-9);
+            SimplexResult::PhaseOneIterationLimit(limit) => {
+                assert_eq!(limit.auxiliary_solution.basis_indices, vec![3, 4]);
+                assert_abs_diff_eq!(
+                    limit.auxiliary_solution.objective_value,
+                    1.25,
+                    epsilon = 1.0e-9
+                );
             }
             _ => panic!("expected a Phase I iteration-limit result"),
         }

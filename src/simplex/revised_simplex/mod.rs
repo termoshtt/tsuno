@@ -98,7 +98,7 @@ pub enum SimplexSolveResult {
 pub enum SimplexResult {
     Optimal(SimplexSolution),
     IterationLimit(SimplexSolution),
-    PhaseOneIterationLimit(SimplexSolution),
+    PhaseOneIterationLimit(PhaseOneIterationLimit),
     Infeasible(PhaseOneInfeasible),
     Unbounded {
         entering: PricedColumn,
