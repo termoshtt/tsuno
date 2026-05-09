@@ -35,13 +35,36 @@ and provides the following pieces.
 - [x] Structured simplex traces for solver paths and snapshot tests.
 
 The LU update path currently uses eta updates. Forrest-Tomlin-style updates,
-explicit refactorization, residual checks, and sparse right-hand-side solve
-paths are future improvements to the linear algebra kernel.
+stronger numerical pivoting, explicit refactorization, residual checks, and
+sparse right-hand-side solve paths are future improvements to the linear algebra
+kernel.
 
 ## Roadmap
 
 The project goal is to grow from a primal revised simplex implementation into
 an LP analysis toolkit that can also explain infeasibility.
+
+### Sparse LU Kernel
+
+The sparse LU kernel is the performance-critical basis representation used by
+the revised simplex variants. Its current product-form eta update path is
+simple and testable, but it is not the final performance target.
+
+- [ ] Improve numerical stability in sparse pivot selection.
+  - Add threshold pivoting around the current Markowitz-style sparsity
+    heuristic.
+  - Track growth, small pivots, and residual quality so unstable bases can be
+    refactorized.
+- [ ] Add explicit basis refactorization from the latest basis matrix.
+- [ ] Replace or supplement eta updates with Forrest-Tomlin-style updates to
+  keep repeated one-column basis changes cheaper.
+- [ ] Add sparse right-hand-side solve paths for both `B x = rhs` and
+  `B^T x = rhs`.
+- [ ] Add hyper-sparse solve paths for simplex pricing and pivot operations
+  where the right-hand side or result remains very sparse.
+- [ ] Reduce allocation and data movement in repeated basis solves.
+- [ ] Benchmark factorization, solve, transposed solve, and update workloads
+  across several sparsity levels.
 
 ### Primal Revised Simplex
 
