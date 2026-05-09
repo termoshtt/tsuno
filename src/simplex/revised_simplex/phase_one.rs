@@ -1,8 +1,8 @@
 use ndarray::{Array1, Array2};
 
 use super::{
-    RevisedSimplex, RevisedSimplexOptions, SimplexResult, SimplexSolution, SimplexSolveResult,
-    SimplexTrace, SimplexTracePhase,
+    RevisedSimplex, RevisedSimplexOptions, SimplexSolution, SimplexSolveResult, SimplexTrace,
+    SimplexTracePhase,
 };
 use crate::simplex::StandardFormLp;
 
@@ -31,7 +31,7 @@ pub enum PhaseOneError {
 
 #[derive(Clone, Debug, PartialEq)]
 /// Result of Phase I feasible-basis construction.
-enum PhaseOneResult {
+pub(super) enum PhaseOneResult {
     Feasible { basis_indices: Vec<usize> },
     Infeasible(PhaseOneInfeasible),
     IterationLimit(PhaseOneIterationLimit),
@@ -104,7 +104,7 @@ impl PhaseOneAuxiliaryProblem {
     }
 
     /// Solve the auxiliary Phase I problem and extract an original feasible basis.
-    fn solve(
+    pub(super) fn solve(
         self,
         options: RevisedSimplexOptions,
         trace: &mut impl SimplexTrace,
@@ -143,51 +143,6 @@ impl PhaseOneAuxiliaryProblem {
                 }))
             }
             SimplexSolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
-        }
-    }
-}
-
-#[katexit::katexit]
-/// Solve a standard-form LP with a Phase I feasible-basis construction.
-///
-/// This is the top-level primal simplex entry point for
-///
-/// $$
-/// \min c^T x
-/// \quad \text{s.t.} \quad
-/// A x = b,\quad x \ge 0.
-/// $$
-///
-/// It first solves the Phase I auxiliary problem
-///
-/// $$
-/// \min \mathbf{1}^T w
-/// \quad \text{s.t.} \quad
-/// D A x + w = D b,\quad x,w \ge 0,
-/// $$
-///
-/// where $D$ is a diagonal row-sign matrix chosen so that $D b \ge 0$.
-/// If the Phase I optimum is positive, the original LP is infeasible. If it is
-/// zero, the resulting feasible original basis is used to start Phase II.
-///
-/// The top-level solver exposes one full-featured entry point. Pass
-/// [`RevisedSimplexOptions::default`] for default tolerances and iteration
-/// limits, and pass [`crate::simplex::NoTrace`] when no trace collection is
-/// needed.
-pub fn solve(
-    lp: StandardFormLp,
-    options: RevisedSimplexOptions,
-    trace: &mut impl SimplexTrace,
-) -> Result<SimplexResult, super::SimplexError> {
-    match PhaseOneAuxiliaryProblem::new(&lp).solve(options.clone(), trace)? {
-        PhaseOneResult::Feasible { basis_indices } => {
-            let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
-            trace.phase_started(SimplexTracePhase::PhaseTwo);
-            simplex.solve(trace).map(SimplexResult::from)
-        }
-        PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(infeasible)),
-        PhaseOneResult::IterationLimit(solution) => {
-            Ok(SimplexResult::PhaseOneIterationLimit(solution))
         }
     }
 }
@@ -283,7 +238,7 @@ mod tests {
     use ndarray::array;
 
     use super::*;
-    use crate::simplex::{FullTrace, NoTrace};
+    use crate::simplex::{FullTrace, NoTrace, SimplexResult, solve};
 
     #[test]
     fn phase_one_returns_original_feasible_basis() {
