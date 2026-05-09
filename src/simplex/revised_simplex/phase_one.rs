@@ -93,12 +93,45 @@ impl PhaseOneAuxiliaryProblem {
         &self.initial_basis_indices
     }
 
-    fn into_parts(self) -> (StandardFormLp, usize, Vec<usize>) {
-        (
+    /// Solve the auxiliary Phase I problem and extract an original feasible basis.
+    fn solve(
+        self,
+        options: RevisedSimplexOptions,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<PhaseOneResult, PhaseOneError> {
+        let mut simplex = RevisedSimplex::with_options(
             self.auxiliary_lp,
-            self.original_column_count,
             self.initial_basis_indices,
+            options.clone(),
         )
+        .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
+
+        trace.phase_started(SimplexTracePhase::PhaseOne);
+        match simplex
+            .solve(trace)
+            .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?
+        {
+            SimplexSolveResult::Optimal(solution) => {
+                if solution.objective_value > options.pivot_tolerance {
+                    return Ok(PhaseOneResult::Infeasible(PhaseOneInfeasible {
+                        objective_value: solution.objective_value,
+                        iterations: solution.iterations,
+                    }));
+                }
+
+                pivot_out_artificial_columns(
+                    &mut simplex,
+                    self.original_column_count,
+                    options.pivot_tolerance,
+                )?;
+                let basis_indices = simplex.basis.indices().to_vec();
+                Ok(PhaseOneResult::Feasible { basis_indices })
+            }
+            SimplexSolveResult::IterationLimit(solution) => {
+                Ok(PhaseOneResult::IterationLimit(solution))
+            }
+            SimplexSolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
+        }
     }
 }
 
@@ -134,7 +167,7 @@ pub fn solve(
     options: RevisedSimplexOptions,
     trace: &mut impl SimplexTrace,
 ) -> Result<SimplexResult, super::SimplexError> {
-    match run_phase_one(&lp, options.clone(), trace)? {
+    match PhaseOneAuxiliaryProblem::new(&lp).solve(options.clone(), trace)? {
         PhaseOneResult::Feasible { basis_indices } => {
             let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
             trace.phase_started(SimplexTracePhase::PhaseTwo);
@@ -144,45 +177,6 @@ pub fn solve(
         PhaseOneResult::IterationLimit(solution) => {
             Ok(SimplexResult::PhaseOneIterationLimit(solution))
         }
-    }
-}
-
-/// Run Phase I feasible-basis construction while recording simplex steps.
-fn run_phase_one(
-    lp: &StandardFormLp,
-    options: RevisedSimplexOptions,
-    trace: &mut impl SimplexTrace,
-) -> Result<PhaseOneResult, PhaseOneError> {
-    let (auxiliary_lp, original_column_count, auxiliary_basis) =
-        PhaseOneAuxiliaryProblem::new(lp).into_parts();
-    let mut simplex = RevisedSimplex::with_options(auxiliary_lp, auxiliary_basis, options.clone())
-        .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
-
-    trace.phase_started(SimplexTracePhase::PhaseOne);
-    match simplex
-        .solve(trace)
-        .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?
-    {
-        SimplexSolveResult::Optimal(solution) => {
-            if solution.objective_value > options.pivot_tolerance {
-                return Ok(PhaseOneResult::Infeasible(PhaseOneInfeasible {
-                    objective_value: solution.objective_value,
-                    iterations: solution.iterations,
-                }));
-            }
-
-            pivot_out_artificial_columns(
-                &mut simplex,
-                original_column_count,
-                options.pivot_tolerance,
-            )?;
-            let basis_indices = simplex.basis.indices().to_vec();
-            Ok(PhaseOneResult::Feasible { basis_indices })
-        }
-        SimplexSolveResult::IterationLimit(solution) => {
-            Ok(PhaseOneResult::IterationLimit(solution))
-        }
-        SimplexSolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
     }
 }
 
@@ -283,7 +277,9 @@ mod tests {
     fn phase_one_returns_original_feasible_basis() {
         let lp = feasible_lp_without_slack_basis();
 
-        let result = run_phase_one(&lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
+        let result = PhaseOneAuxiliaryProblem::new(&lp)
+            .solve(RevisedSimplexOptions::default(), &mut NoTrace)
+            .unwrap();
 
         match result {
             PhaseOneResult::Feasible { basis_indices } => {
