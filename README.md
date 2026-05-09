@@ -8,113 +8,104 @@ Simplex-based LP solver/analyzer for advanced usages.
 - `tsuno::simplex`: standard-form LP and basis-level building blocks for the
   revised simplex method.
 
-## `tsuno::lu` Planned Features
+## Current Status
 
-`tsuno::lu` provides the linear algebra kernel needed by a revised simplex
-method without explicitly forming the inverse of the basis matrix. The public
-API uses descriptive operation names instead of traditional Fortran-style
-abbreviations.
+The current implementation is centered on standard-form LPs
 
-- [x] Build an initial sparse LU representation from COO input.
-- [x] Build an initial sparse LU representation from a dense `ndarray`.
-- [x] Choose initial pivots with a Markowitz-style fill-in estimate.
-- [x] Store the nominal lower factor as a product of unit triangular
-  eliminations.
-- [x] Store the nominal upper factor as sparse pivot rows.
-- [x] Reconstruct the original matrix from the current initial factorization for
-  validation.
-- [x] Solve a linear system with the represented matrix.
-  - Name: `solve(&Array1<f64>) -> Array1<f64>`, for `A x = rhs`. In a simplex
-    solver, this is used with the current basis matrix `B`.
-- [x] Solve a transposed linear system with the represented matrix.
-  - Name: `solve_transposed(&Array1<f64>) -> Array1<f64>`, for
-    `A^T x = rhs`. In a simplex solver, this is used with the current basis
-    matrix `B`.
-- [x] Add a product-form basis column replacement.
-  - Name: `replace_column`, returning `Result<(), UpdateError>` after storing
-    the eta column `A^{-1} a_new` and the replaced column position. In a
-    simplex solver, `A` is the current basis matrix `B`.
-  - Initial implementation: store product-form eta updates. This keeps the
-    update logic simple while the solve and transposed-solve APIs are still
-    being built out.
-- [x] Apply accumulated column replacements when solving basis systems.
-- [x] Apply accumulated column replacements in reverse order when solving
-  transposed basis systems.
-- [x] Report how many delayed basis updates are currently stored.
-  - Name: `update_count`.
-- [x] Report whether accumulated delayed updates have reached a refactor
-  threshold.
-  - Name: `should_refactor`.
-- [ ] Rebuild the sparse LU representation from the latest explicit basis when
-  delayed updates become too expensive or inaccurate.
-  - Proposed name: `refactor_basis`.
-- [ ] Provide residual checks for basis solves and transposed basis solves.
-- [ ] Provide sparse right-hand-side solve paths for basis systems.
-- [ ] Provide sparse right-hand-side solve paths for transposed basis systems.
-- [ ] Add Forrest-Tomlin-style updates to reduce product-form update growth.
-  - Long-term direction: replace or supplement accumulated eta updates with a
-    Forrest-Tomlin representation once the product-form update path is correct
-    and covered by tests.
+```text
+min c^T x
+subject to A x = b
+           x >= 0
+```
 
-## `tsuno::simplex` Planned Features
+and provides the following pieces.
 
-`tsuno::simplex` provides the LP-side structures that sit above the LU kernel:
-standard-form problem data, basis ownership, pricing quantities, and eventually
-the revised simplex iteration loop.
+- [x] Sparse LU factorization for basis matrices.
+- [x] Basis solves for `B x = rhs` and `B^T x = rhs`.
+- [x] Product-form eta updates for one-column basis replacement.
+- [x] Standard-form LP representation as `A`, `b`, and `c`.
+- [x] Basis-level simplex quantities:
+  - basic solution `x_I = B^{-1} b`
+  - basis costs `c_I`
+  - dual variables `y = B^{-T} c_I`
+  - reduced costs `r_j = c_j - A_j^T y`
+- [x] Primal revised simplex step and solve loop.
+- [x] Phase I auxiliary problem with artificial variables.
+- [x] Top-level `simplex::solve` that runs Phase I and then Phase II.
+- [x] Structured simplex traces for solver paths and snapshot tests.
 
-- [x] Represent a standard-form LP as `A`, `b`, and `c`.
-  - Name: `StandardFormLp`, for `min c^T x` subject to `A x = b`, `x >= 0`.
-- [x] Build a basis representation from a standard-form matrix and basis
-  column indices.
-  - Name: `Basis`.
-- [x] Solve basis systems through the LU-backed basis representation.
-  - Name: `Basis::solve`, for `B x = rhs`.
-- [x] Solve transposed basis systems through the LU-backed basis representation.
-  - Name: `Basis::solve_transposed`, for `B^T x = rhs`.
-- [x] Replace one basis column after a pivot.
-  - Name: `Basis::replace_column`.
-- [x] Return a constraint matrix column for pricing and basis replacement.
-  - Name: `StandardFormLp::column`, returning `A_j`.
-- [x] Compute the basis cost vector.
-  - Name: `StandardFormLp::basis_costs`, returning `c_I`.
-- [x] Compute dual variables for a basis.
-  - Name: `StandardFormLp::dual_variables`, returning `y = B^{-T} c_I`.
-- [x] Compute the reduced cost of a single column.
-  - Name: `StandardFormLp::reduced_cost`, returning `r_j = c_j - A_j^T y`.
-- [x] Return the nonbasis column indices.
-  - Name: `StandardFormLp::nonbasis_indices`.
-- [x] Compute reduced costs for all nonbasis columns.
-  - Name: `StandardFormLp::reduced_costs`.
-- [x] Select an entering column from reduced costs.
-  - Name: `StandardFormLp::entering_column`, returning the most negative
-    nonbasis reduced cost below a tolerance.
-- [x] Compute the current basic solution.
-  - Name: `StandardFormLp::basic_solution`, returning `x_I = B^{-1} b`.
-- [x] Represent the current revised simplex state.
-  - Name: `RevisedSimplex`, owning `StandardFormLp`, the current `Basis`, and
-    simplex options.
-- [x] Compute a pivot direction for an entering column.
-  - Internal operation in `RevisedSimplex::step`, computing `d = B^{-1} A_q`.
-- [x] Select a leaving basis position with a ratio test.
-  - Internal operation in `RevisedSimplex::step`.
-- [x] Apply one primal simplex pivot by updating the basis and bookkeeping.
-  - Name: `RevisedSimplex::step`.
-- [x] Represent iteration outcomes such as optimal, unbounded, and pivoted.
-  - Name: `SimplexStep`.
-- [x] Solve by repeatedly applying revised simplex steps.
-  - Name: `RevisedSimplex::solve`.
-- [x] Represent solve outcomes and optimal solutions.
-  - Names: `SimplexSolveResult` and `SimplexSolution`.
-- [x] Represent the Phase I auxiliary problem with artificial variables.
-  - Name: `PhaseOneAuxiliaryProblem`, building
-    `min 1^T w` subject to `D A x + I w = D b`, `x,w >= 0`.
-- [x] Provide a top-level standard-form solve path that does not require callers
-  to provide an initial basis.
-  - Name: `solve`, running Phase I first and then Phase II primal simplex with
-    caller-provided options and trace output.
-- [x] Represent top-level outcomes including infeasibility discovered by Phase
-  I.
-  - Name: `SimplexResult`.
+The LU update path currently uses eta updates. Forrest-Tomlin-style updates,
+explicit refactorization, residual checks, and sparse right-hand-side solve
+paths are future improvements to the linear algebra kernel.
+
+## Roadmap
+
+The project goal is to grow from a primal revised simplex implementation into
+an LP analysis toolkit that can also explain infeasibility.
+
+### Primal Revised Simplex
+
+- [x] Implement basis-level revised simplex operations.
+- [x] Implement Phase I feasible-basis construction.
+- [x] Implement top-level primal solve for standard-form LPs.
+- [ ] Refine naming and module boundaries if dual simplex needs shared solver
+  state.
+- [ ] Add optional fast paths for obvious feasible initial bases, such as slack
+  bases, so top-level solve does not always need Phase I.
+
+### Dual Revised Simplex
+
+Dual simplex keeps dual feasibility and repairs primal infeasibility. It should
+reuse the existing basis, basis solve, transposed solve, reduced-cost, and trace
+infrastructure.
+
+- [ ] Represent a dual revised simplex solver state.
+- [ ] Select a leaving basis position from negative basic variables.
+- [ ] Compute the pivot row via a transposed basis solve.
+- [ ] Select an entering nonbasis column with the dual ratio test.
+- [ ] Implement one dual simplex pivot step.
+- [ ] Implement the dual simplex solve loop and result type.
+- [ ] Share common basis-state and trace concepts with primal simplex where the
+  API remains clear.
+
+### Farkas Certificates
+
+For the standard-form infeasible system
+
+```text
+A x = b
+x >= 0
+```
+
+a Farkas certificate can be represented by a multiplier `y` satisfying
+
+```text
+A^T y >= 0
+b^T y < 0
+```
+
+which proves that no feasible `x >= 0` can satisfy `A x = b`.
+
+- [ ] Add a `FarkasCertificate` type for standard-form LPs.
+- [ ] Add verification APIs that report `min(A^T y)` and `b^T y`.
+- [ ] Return a certificate from Phase I infeasible results.
+- [ ] Add tests that validate certificates produced by Phase I.
+- [ ] Keep the certificate API independent enough to support IIS construction.
+
+### IIS Construction
+
+An irreducible infeasible subsystem (IIS) is a minimal set of constraints that
+is already infeasible. This is an analysis feature rather than just a solver
+status, so it needs enough modeling information to explain infeasibility back
+to the caller.
+
+- [ ] Decide whether the first IIS implementation targets only standard-form
+  rows or introduces a higher-level LP representation with inequalities,
+  equalities, and variable bounds.
+- [ ] Preserve mappings from a higher-level LP into standard form.
+- [ ] Use Farkas certificates as infeasibility witnesses.
+- [ ] Implement a deletion-filter style IIS extraction algorithm.
+- [ ] Return IIS results in terms of the caller-facing constraint identifiers.
 
 # License
 Copyright (c) 2026 Toshiki Teramura (@termoshtt)
