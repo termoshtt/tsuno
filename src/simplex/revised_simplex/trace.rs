@@ -6,9 +6,17 @@ use super::{LeavingColumn, SimplexStep};
 use crate::simplex::PricedColumn;
 
 pub trait SimplexTrace {
+    fn phase_started(&mut self, _phase: SimplexTracePhase) {}
+
     fn step_started(&mut self, _iteration: usize, _basis: &[usize]) {}
 
     fn step_completed(&mut self, event: SimplexTraceEvent<'_>);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SimplexTracePhase {
+    PhaseOne,
+    PhaseTwo,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -33,6 +41,7 @@ pub struct SimplexTraceEvent<'a> {
 /// [`fmt::Display`].
 #[derive(Clone, Debug, Default)]
 pub struct FullTrace {
+    current_phase: Option<SimplexTracePhase>,
     pending_basis_before: Option<Vec<usize>>,
     steps: Vec<FullTraceStep>,
 }
@@ -40,6 +49,7 @@ pub struct FullTrace {
 /// One recorded revised simplex iteration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FullTraceStep {
+    pub phase: Option<SimplexTracePhase>,
     pub iteration: usize,
     pub basis_before: Vec<usize>,
     pub outcome: FullTraceOutcome,
@@ -62,6 +72,10 @@ pub enum FullTraceOutcome {
 }
 
 impl SimplexTrace for FullTrace {
+    fn phase_started(&mut self, phase: SimplexTracePhase) {
+        self.current_phase = Some(phase);
+    }
+
     fn step_started(&mut self, _iteration: usize, basis: &[usize]) {
         self.pending_basis_before = Some(basis.to_vec());
     }
@@ -69,6 +83,7 @@ impl SimplexTrace for FullTrace {
     fn step_completed(&mut self, event: SimplexTraceEvent<'_>) {
         let basis_before = self.pending_basis_before.take().unwrap();
         self.steps.push(FullTraceStep {
+            phase: self.current_phase,
             iteration: event.iteration,
             basis_before,
             outcome: FullTraceOutcome::from(event.step),
@@ -122,10 +137,22 @@ impl fmt::Display for FullTrace {
 
 impl fmt::Display for FullTraceStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(phase) = self.phase {
+            writeln!(f, "phase: {phase}")?;
+        }
         writeln!(f, "iteration {}", self.iteration)?;
         writeln!(f, "basis before: {:?}", self.basis_before)?;
         write!(f, "{}", self.outcome)?;
         write!(f, "basis after: {:?}", self.basis_after)
+    }
+}
+
+impl fmt::Display for SimplexTracePhase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimplexTracePhase::PhaseOne => write!(f, "phase one"),
+            SimplexTracePhase::PhaseTwo => write!(f, "phase two"),
+        }
     }
 }
 

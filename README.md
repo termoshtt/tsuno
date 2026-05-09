@@ -111,6 +111,8 @@ the revised simplex iteration loop.
 - [x] Provide a top-level standard-form solve path that does not require callers
   to provide an initial basis.
   - Name: `solve`, running Phase I first and then Phase II primal simplex.
+- [x] Trace the top-level standard-form solve path across Phase I and Phase II.
+  - Name: `solve_with_trace`.
 - [x] Represent top-level outcomes including infeasibility discovered by Phase
   I.
   - Name: `SimplexResult`.

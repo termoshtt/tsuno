@@ -1,7 +1,8 @@
 use ndarray::{Array1, Array2};
 
 use super::{
-    RevisedSimplex, RevisedSimplexOptions, SimplexResult, SimplexSolution, SimplexSolveResult,
+    NoTrace, RevisedSimplex, RevisedSimplexOptions, SimplexResult, SimplexSolution,
+    SimplexSolveResult, SimplexTrace, SimplexTracePhase,
 };
 use crate::simplex::StandardFormLp;
 
@@ -50,17 +51,35 @@ pub enum PhaseOneResult {
 /// zero, the resulting feasible original basis is used to start Phase II via
 /// [`RevisedSimplex::solve`].
 pub fn solve(lp: StandardFormLp) -> Result<SimplexResult, super::SimplexError> {
-    solve_with_options(lp, RevisedSimplexOptions::default())
+    solve_impl(lp, RevisedSimplexOptions::default(), &mut NoTrace)
 }
 
+/// Solve a standard-form LP while recording both Phase I and Phase II steps.
+pub fn solve_with_trace(
+    lp: StandardFormLp,
+    trace: &mut impl SimplexTrace,
+) -> Result<SimplexResult, super::SimplexError> {
+    solve_impl(lp, RevisedSimplexOptions::default(), trace)
+}
+
+/// Solve a standard-form LP with caller-provided simplex options.
 pub fn solve_with_options(
     lp: StandardFormLp,
     options: RevisedSimplexOptions,
 ) -> Result<SimplexResult, super::SimplexError> {
-    match find_feasible_basis(&lp, options.clone())? {
+    solve_impl(lp, options, &mut NoTrace)
+}
+
+fn solve_impl(
+    lp: StandardFormLp,
+    options: RevisedSimplexOptions,
+    trace: &mut impl SimplexTrace,
+) -> Result<SimplexResult, super::SimplexError> {
+    match find_feasible_basis_with_trace(&lp, options.clone(), trace)? {
         PhaseOneResult::Feasible { basis_indices } => {
             let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
-            simplex.solve().map(map_phase_two_result)
+            trace.phase_started(SimplexTracePhase::PhaseTwo);
+            simplex.solve_with_trace(trace).map(map_phase_two_result)
         }
         PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(infeasible)),
         PhaseOneResult::IterationLimit(solution) => {
@@ -73,6 +92,15 @@ pub fn find_feasible_basis(
     lp: &StandardFormLp,
     options: RevisedSimplexOptions,
 ) -> Result<PhaseOneResult, PhaseOneError> {
+    find_feasible_basis_with_trace(lp, options, &mut NoTrace)
+}
+
+/// Run Phase I feasible-basis construction while recording simplex steps.
+pub fn find_feasible_basis_with_trace(
+    lp: &StandardFormLp,
+    options: RevisedSimplexOptions,
+    trace: &mut impl SimplexTrace,
+) -> Result<PhaseOneResult, PhaseOneError> {
     let normalized = normalize_rows(lp);
     let original_column_count = lp.a().ncols();
     let auxiliary_lp = auxiliary_lp(&normalized);
@@ -80,8 +108,9 @@ pub fn find_feasible_basis(
     let mut simplex = RevisedSimplex::with_options(auxiliary_lp, auxiliary_basis, options.clone())
         .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
 
+    trace.phase_started(SimplexTracePhase::PhaseOne);
     match simplex
-        .solve()
+        .solve_with_trace(trace)
         .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?
     {
         SimplexSolveResult::Optimal(solution) => {
@@ -214,6 +243,7 @@ mod tests {
     use ndarray::array;
 
     use super::*;
+    use crate::simplex::FullTrace;
 
     #[test]
     fn phase_one_finds_original_feasible_basis() {
@@ -243,6 +273,16 @@ mod tests {
             }
             _ => panic!("expected an optimal solution"),
         }
+    }
+
+    #[test]
+    fn simplex_solve_with_trace_records_phase_one_and_phase_two() {
+        let mut trace = FullTrace::default();
+
+        let result = solve_with_trace(feasible_lp_without_slack_basis(), &mut trace).unwrap();
+
+        assert!(matches!(result, SimplexResult::Optimal(_)));
+        insta::assert_snapshot!(trace);
     }
 
     #[test]
