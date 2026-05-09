@@ -21,10 +21,85 @@ pub enum PhaseOneError {
 
 #[derive(Clone, Debug, PartialEq)]
 /// Result of Phase I feasible-basis construction.
-pub enum PhaseOneResult {
+enum PhaseOneResult {
     Feasible { basis_indices: Vec<usize> },
     Infeasible(PhaseOneInfeasible),
     IterationLimit(SimplexSolution),
+}
+
+#[derive(Clone, Debug)]
+#[katexit::katexit]
+/// Auxiliary Phase I problem used to construct a primal feasible basis.
+///
+/// For an original standard-form LP
+///
+/// $$
+/// \min c^T x
+/// \quad \text{s.t.} \quad
+/// A x = b,\quad x \ge 0,
+/// $$
+///
+/// Phase I first flips rows with negative right-hand side. Let $D$ be the
+/// diagonal matrix with entries $\pm 1$ chosen so that
+///
+/// $$
+/// \bar A = D A,\qquad
+/// \bar b = D b,\qquad
+/// \bar b \ge 0.
+/// $$
+///
+/// The auxiliary problem introduces one artificial variable $w_i$ per row:
+///
+/// $$
+/// \min \mathbf{1}^T w
+/// \quad \text{s.t.} \quad
+/// \bar A x + I w = \bar b,\quad x,w \ge 0.
+/// $$
+///
+/// Its constraint matrix is $[\bar A\ I]$. The artificial columns form an
+/// immediate feasible basis because $w = \bar b \ge 0$. If the optimum of this
+/// auxiliary problem is positive, the original LP is infeasible; if it is zero,
+/// the resulting basis can be converted to an original feasible basis for
+/// Phase II.
+pub struct PhaseOneAuxiliaryProblem {
+    lp: StandardFormLp,
+    original_column_count: usize,
+    initial_basis_indices: Vec<usize>,
+}
+
+impl PhaseOneAuxiliaryProblem {
+    pub fn new(lp: &StandardFormLp) -> Self {
+        let normalized = normalize_rows(lp);
+        let original_column_count = normalized.a().ncols();
+        let auxiliary_lp = build_auxiliary_lp(&normalized);
+        let initial_basis_indices =
+            (original_column_count..original_column_count + normalized.a().nrows()).collect();
+        Self {
+            lp: auxiliary_lp,
+            original_column_count,
+            initial_basis_indices,
+        }
+    }
+
+    pub fn lp(&self) -> &StandardFormLp {
+        &self.lp
+    }
+
+    pub fn original_column_count(&self) -> usize {
+        self.original_column_count
+    }
+
+    pub fn initial_basis_indices(&self) -> &[usize] {
+        &self.initial_basis_indices
+    }
+
+    fn into_parts(self) -> (StandardFormLp, usize, Vec<usize>) {
+        (
+            self.lp,
+            self.original_column_count,
+            self.initial_basis_indices,
+        )
+    }
 }
 
 #[katexit::katexit]
@@ -63,7 +138,7 @@ pub fn solve(
         PhaseOneResult::Feasible { basis_indices } => {
             let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
             trace.phase_started(SimplexTracePhase::PhaseTwo);
-            simplex.solve(trace).map(map_phase_two_result)
+            simplex.solve(trace).map(SimplexResult::from)
         }
         PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(infeasible)),
         PhaseOneResult::IterationLimit(solution) => {
@@ -72,24 +147,14 @@ pub fn solve(
     }
 }
 
-pub fn find_feasible_basis(
-    lp: &StandardFormLp,
-    options: RevisedSimplexOptions,
-    trace: &mut impl SimplexTrace,
-) -> Result<PhaseOneResult, PhaseOneError> {
-    run_phase_one(lp, options, trace)
-}
-
 /// Run Phase I feasible-basis construction while recording simplex steps.
 fn run_phase_one(
     lp: &StandardFormLp,
     options: RevisedSimplexOptions,
     trace: &mut impl SimplexTrace,
 ) -> Result<PhaseOneResult, PhaseOneError> {
-    let normalized = normalize_rows(lp);
-    let original_column_count = lp.a().ncols();
-    let auxiliary_lp = auxiliary_lp(&normalized);
-    let auxiliary_basis = (original_column_count..original_column_count + lp.a().nrows()).collect();
+    let (auxiliary_lp, original_column_count, auxiliary_basis) =
+        PhaseOneAuxiliaryProblem::new(lp).into_parts();
     let mut simplex = RevisedSimplex::with_options(auxiliary_lp, auxiliary_basis, options.clone())
         .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
 
@@ -121,22 +186,6 @@ fn run_phase_one(
     }
 }
 
-fn map_phase_two_result(result: SimplexSolveResult) -> SimplexResult {
-    match result {
-        SimplexSolveResult::Optimal(solution) => SimplexResult::Optimal(solution),
-        SimplexSolveResult::IterationLimit(solution) => SimplexResult::IterationLimit(solution),
-        SimplexSolveResult::Unbounded {
-            entering,
-            direction,
-            iterations,
-        } => SimplexResult::Unbounded {
-            entering,
-            direction,
-            iterations,
-        },
-    }
-}
-
 fn normalize_rows(lp: &StandardFormLp) -> StandardFormLp {
     let mut a = lp.a().clone();
     let mut b = lp.b().clone();
@@ -151,7 +200,7 @@ fn normalize_rows(lp: &StandardFormLp) -> StandardFormLp {
     StandardFormLp::new(a, b, lp.c().clone()).unwrap()
 }
 
-fn auxiliary_lp(lp: &StandardFormLp) -> StandardFormLp {
+fn build_auxiliary_lp(lp: &StandardFormLp) -> StandardFormLp {
     let nrows = lp.a().nrows();
     let ncols = lp.a().ncols();
     let mut a = Array2::zeros((nrows, ncols + nrows));
@@ -231,11 +280,10 @@ mod tests {
     use crate::simplex::{FullTrace, NoTrace};
 
     #[test]
-    fn phase_one_finds_original_feasible_basis() {
+    fn phase_one_returns_original_feasible_basis() {
         let lp = feasible_lp_without_slack_basis();
 
-        let result =
-            find_feasible_basis(&lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
+        let result = run_phase_one(&lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
 
         match result {
             PhaseOneResult::Feasible { basis_indices } => {
@@ -246,6 +294,27 @@ mod tests {
             }
             _ => panic!("expected a feasible basis"),
         }
+    }
+
+    #[test]
+    fn phase_one_auxiliary_problem_builds_artificial_basis() {
+        let lp = feasible_lp_without_slack_basis();
+
+        let auxiliary = PhaseOneAuxiliaryProblem::new(&lp);
+
+        assert_eq!(auxiliary.original_column_count(), 3);
+        assert_eq!(auxiliary.initial_basis_indices(), &[3, 4]);
+        assert_abs_diff_eq!(
+            auxiliary.lp().a(),
+            &array![[1.0, 1.0, 0.0, 1.0, 0.0], [1.0, 0.0, 1.0, 0.0, 1.0]],
+            epsilon = 1.0e-9
+        );
+        assert_abs_diff_eq!(auxiliary.lp().b(), &array![1.0, 0.25], epsilon = 1.0e-9);
+        assert_abs_diff_eq!(
+            auxiliary.lp().c(),
+            &array![0.0, 0.0, 0.0, 1.0, 1.0],
+            epsilon = 1.0e-9
+        );
     }
 
     #[test]

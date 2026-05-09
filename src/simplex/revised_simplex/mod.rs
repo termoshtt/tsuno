@@ -107,6 +107,24 @@ pub enum SimplexResult {
     },
 }
 
+impl From<SimplexSolveResult> for SimplexResult {
+    fn from(result: SimplexSolveResult) -> Self {
+        match result {
+            SimplexSolveResult::Optimal(solution) => SimplexResult::Optimal(solution),
+            SimplexSolveResult::IterationLimit(solution) => SimplexResult::IterationLimit(solution),
+            SimplexSolveResult::Unbounded {
+                entering,
+                direction,
+                iterations,
+            } => SimplexResult::Unbounded {
+                entering,
+                direction,
+                iterations,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum SimplexError {
     Problem(StandardFormError),
