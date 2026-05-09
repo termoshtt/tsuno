@@ -82,7 +82,7 @@ Dual simplex keeps dual feasibility and repairs primal infeasibility. It should
 reuse the existing basis, basis solve, transposed solve, reduced-cost, and trace
 infrastructure.
 
-- [ ] Represent a dual revised simplex solver state.
+- [x] Represent a dual revised simplex solver state.
 - [ ] Select a leaving basis position from negative basic variables.
 - [ ] Compute the pivot row via a transposed basis solve.
 - [ ] Select an entering nonbasis column with the dual ratio test.
