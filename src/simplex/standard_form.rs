@@ -133,10 +133,25 @@ impl StandardFormLp {
 
     /// Compute the current basic solution values.
     ///
-    /// For a basis matrix $B = A_I$, the basic variables satisfy $B x_I = b$.
-    /// This returns $x_I = B^{-1} b$ in the same order as [`Basis::indices`].
-    /// Nonbasis variables are not included here and have value zero in the
-    /// corresponding full basic solution.
+    /// For a basis index set $I$ and its complement $N$, the constraint matrix
+    /// is split as $A = [A_I\ A_N]$. A basic solution sets the nonbasis
+    /// variables to zero:
+    ///
+    /// $$
+    /// x_N = 0.
+    /// $$
+    ///
+    /// Substituting this into $A x = b$ gives
+    ///
+    /// $$
+    /// A_I x_I + A_N x_N = b,
+    /// \qquad
+    /// B x_I = b,
+    /// $$
+    ///
+    /// where $B = A_I$. This returns $x_I = B^{-1} b$ in the same order as
+    /// [`Basis::indices`]. Nonbasis variables are not included here and have
+    /// value zero in the corresponding full basic solution.
     pub fn basic_solution(&self, basis: &Basis) -> Result<Array1<f64>, StandardFormError> {
         self.basis_column_mask(basis)?;
         Ok(basis.solve(&self.b))

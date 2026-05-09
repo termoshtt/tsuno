@@ -2,10 +2,16 @@ use ndarray::Array1;
 
 use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
+mod trace;
+
+pub use trace::*;
+
 #[derive(Clone, Debug)]
 pub struct RevisedSimplexOptions {
     pub reduced_cost_tolerance: f64,
     pub pivot_tolerance: f64,
+    /// Maximum number of `step` calls attempted by [`RevisedSimplex::solve`].
+    pub max_iterations: usize,
 }
 
 impl Default for RevisedSimplexOptions {
@@ -13,6 +19,7 @@ impl Default for RevisedSimplexOptions {
         Self {
             reduced_cost_tolerance: 1.0e-9,
             pivot_tolerance: 1.0e-9,
+            max_iterations: 1_000,
         }
     }
 }
@@ -47,6 +54,51 @@ pub enum SimplexStep {
         leaving: LeavingColumn,
         direction: Array1<f64>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[katexit::katexit]
+/// Optimal solution returned by [`RevisedSimplex::solve`].
+///
+/// The `primal` vector is the full decision vector `x`, including both basis
+/// and nonbasis components. Nonbasis components are zero in the returned basic
+/// solution:
+///
+/// $$
+/// x_j = 0 \quad (j \notin I),
+/// \qquad
+/// x_I = B^{-1} b.
+/// $$
+///
+/// The objective value is $c^T x$.
+pub struct SimplexSolution {
+    pub primal: Array1<f64>,
+    pub objective_value: f64,
+    pub basis_indices: Vec<usize>,
+    pub iterations: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+/// Outcome of repeatedly applying revised simplex steps.
+pub enum SimplexSolveResult {
+    Optimal(SimplexSolution),
+    IterationLimit(SimplexSolution),
+    Unbounded {
+        entering: PricedColumn,
+        direction: Array1<f64>,
+        iterations: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SimplexError {
+    Problem(StandardFormError),
+}
+
+impl From<StandardFormError> for SimplexError {
+    fn from(error: StandardFormError) -> Self {
+        SimplexError::Problem(error)
+    }
 }
 
 #[katexit::katexit]
@@ -149,18 +201,35 @@ impl RevisedSimplex {
         &self.options
     }
 
+    /// Compute the current basic solution values.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::basic_solution`].
+    /// See that method for the mathematical definition of the returned
+    /// $x_I = B^{-1} b$ vector.
     pub fn basic_solution(&self) -> Result<Array1<f64>, StandardFormError> {
         self.lp.basic_solution(&self.basis)
     }
 
+    /// Compute the dual variables for the current basis.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::dual_variables`].
+    /// See that method for the transposed basis system $B^T y = c_I$.
     pub fn dual_variables(&self) -> Result<Array1<f64>, StandardFormError> {
         self.lp.dual_variables(&self.basis)
     }
 
+    /// Compute reduced costs for all current nonbasis columns.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::reduced_costs`].
+    /// See that method for the definition of $r_j = c_j - A_j^T y$.
     pub fn reduced_costs(&self) -> Result<Vec<PricedColumn>, StandardFormError> {
         self.lp.reduced_costs(&self.basis)
     }
 
+    /// Select the entering column for the current basis.
+    ///
+    /// This is a state-level wrapper around [`StandardFormLp::entering_column`]
+    /// using [`RevisedSimplexOptions::reduced_cost_tolerance`].
     pub fn entering_column(&self) -> Result<Option<PricedColumn>, StandardFormError> {
         self.lp
             .entering_column(&self.basis, self.options.reduced_cost_tolerance)
@@ -203,6 +272,97 @@ impl RevisedSimplex {
         let column = self.lp.column(entering_column)?.to_owned();
         Ok(self.basis.solve(&column))
     }
+
+    /// Repeatedly apply revised simplex steps until termination.
+    ///
+    /// Each iteration applies [`RevisedSimplex::step`]. If no nonbasis column
+    /// has reduced cost below the tolerance,
+    ///
+    /// $$
+    /// r_j \ge -\epsilon \quad (j \notin I),
+    /// $$
+    ///
+    /// the current basic solution is returned as optimal. If an entering
+    /// column $q$ exists but its direction
+    ///
+    /// $$
+    /// d = B^{-1} A_q
+    /// $$
+    ///
+    /// has no positive component above the pivot tolerance, the problem is
+    /// reported as unbounded in that direction.
+    ///
+    /// If neither condition occurs before
+    /// [`RevisedSimplexOptions::max_iterations`] step attempts, this returns
+    /// [`SimplexSolveResult::IterationLimit`] with the current basic solution.
+    /// That result is deliberately distinct from [`SimplexSolveResult::Optimal`]:
+    /// the solver has a valid current basis and solution, but has not proved
+    /// optimality.
+    pub fn solve(&mut self) -> Result<SimplexSolveResult, SimplexError> {
+        self.solve_with_trace(&mut NoTrace)
+    }
+
+    pub fn solve_with_trace(
+        &mut self,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<SimplexSolveResult, SimplexError> {
+        for iteration in 0..self.options.max_iterations {
+            trace.step_started(iteration, self.basis.indices());
+            let step = self.step()?;
+            trace.step_completed(SimplexTraceEvent {
+                iteration,
+                step: &step,
+                basis_after: self.basis.indices(),
+            });
+
+            match step {
+                SimplexStep::Optimal => {
+                    return Ok(SimplexSolveResult::Optimal(
+                        self.current_solution(iteration)?,
+                    ));
+                }
+                SimplexStep::Unbounded {
+                    entering,
+                    direction,
+                } => {
+                    return Ok(SimplexSolveResult::Unbounded {
+                        entering,
+                        direction,
+                        iterations: iteration,
+                    });
+                }
+                SimplexStep::Pivoted { .. } => {}
+            }
+        }
+
+        Ok(SimplexSolveResult::IterationLimit(
+            self.current_solution(self.options.max_iterations)?,
+        ))
+    }
+
+    fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
+        let basic_solution = self.basic_solution()?;
+        let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
+        let objective_value = self.lp.c().dot(&primal);
+        Ok(SimplexSolution {
+            primal,
+            objective_value,
+            basis_indices: self.basis.indices().to_vec(),
+            iterations,
+        })
+    }
+}
+
+fn full_primal_solution(
+    dimension: usize,
+    basis_indices: &[usize],
+    basic_solution: &Array1<f64>,
+) -> Array1<f64> {
+    let mut primal = Array1::zeros(dimension);
+    for (&column, &value) in basis_indices.iter().zip(basic_solution.iter()) {
+        primal[column] = value;
+    }
+    primal
 }
 
 fn leaving_position(
@@ -226,158 +386,4 @@ fn leaving_position(
 }
 
 #[cfg(test)]
-mod tests {
-    use approx::assert_abs_diff_eq;
-    use ndarray::array;
-
-    use super::*;
-
-    #[test]
-    fn revised_simplex_builds_basis_and_computes_basic_solution() {
-        let simplex = RevisedSimplex::new(example_lp(), vec![0, 1]).unwrap();
-
-        let basic_solution = simplex.basic_solution().unwrap();
-
-        assert_eq!(simplex.basis().indices(), &[0, 1]);
-        assert_abs_diff_eq!(basic_solution, array![0.4, 0.2], epsilon = 1.0e-9);
-    }
-
-    #[test]
-    fn revised_simplex_selects_entering_column_with_options() {
-        let simplex = RevisedSimplex::with_options(
-            improving_slack_lp(),
-            vec![2, 3],
-            RevisedSimplexOptions {
-                reduced_cost_tolerance: 1.0e-9,
-                ..RevisedSimplexOptions::default()
-            },
-        )
-        .unwrap();
-
-        let entering_column = simplex.entering_column().unwrap();
-
-        assert_eq!(
-            entering_column,
-            Some(PricedColumn {
-                column: 1,
-                reduced_cost: -2.0
-            })
-        );
-    }
-
-    #[test]
-    fn revised_simplex_respects_reduced_cost_tolerance() {
-        let simplex = RevisedSimplex::with_options(
-            StandardFormLp::new(
-                array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
-                array![4.0, 3.0],
-                array![-1.0e-8, 2.0, 0.0, 0.0],
-            )
-            .unwrap(),
-            vec![2, 3],
-            RevisedSimplexOptions {
-                reduced_cost_tolerance: 1.0e-7,
-                ..RevisedSimplexOptions::default()
-            },
-        )
-        .unwrap();
-
-        let entering_column = simplex.entering_column().unwrap();
-
-        assert_eq!(entering_column, None);
-    }
-
-    #[test]
-    fn revised_simplex_step_reports_optimal_basis() {
-        let mut simplex = RevisedSimplex::new(slack_lp(), vec![2, 3]).unwrap();
-
-        let step = simplex.step().unwrap();
-
-        assert_eq!(step, SimplexStep::Optimal);
-        assert_eq!(simplex.basis().indices(), &[2, 3]);
-    }
-
-    #[test]
-    fn revised_simplex_step_pivots_basis() {
-        let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
-
-        let step = simplex.step().unwrap();
-
-        match step {
-            SimplexStep::Pivoted {
-                entering,
-                leaving,
-                direction,
-            } => {
-                assert_eq!(
-                    entering,
-                    PricedColumn {
-                        column: 1,
-                        reduced_cost: -2.0
-                    }
-                );
-                assert_eq!(leaving.column, 3);
-                assert_abs_diff_eq!(leaving.step_length, 3.0, epsilon = 1.0e-9);
-                assert_abs_diff_eq!(direction, array![0.0, 1.0], epsilon = 1.0e-9);
-            }
-            _ => panic!("expected a pivoted step"),
-        }
-        assert_eq!(simplex.basis().indices(), &[2, 1]);
-    }
-
-    #[test]
-    fn revised_simplex_step_reports_unbounded_direction() {
-        let mut simplex = RevisedSimplex::new(unbounded_lp(), vec![1]).unwrap();
-
-        let step = simplex.step().unwrap();
-
-        match step {
-            SimplexStep::Unbounded {
-                entering,
-                direction,
-            } => {
-                assert_eq!(
-                    entering,
-                    PricedColumn {
-                        column: 0,
-                        reduced_cost: -1.0
-                    }
-                );
-                assert_abs_diff_eq!(direction, array![-1.0], epsilon = 1.0e-9);
-            }
-            _ => panic!("expected an unbounded step"),
-        }
-        assert_eq!(simplex.basis().indices(), &[1]);
-    }
-
-    fn improving_slack_lp() -> StandardFormLp {
-        StandardFormLp::new(
-            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
-            array![4.0, 3.0],
-            array![-1.0, -2.0, 0.0, 0.0],
-        )
-        .unwrap()
-    }
-
-    fn slack_lp() -> StandardFormLp {
-        StandardFormLp::new(
-            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
-            array![4.0, 3.0],
-            array![1.0, 2.0, 0.0, 0.0],
-        )
-        .unwrap()
-    }
-
-    fn unbounded_lp() -> StandardFormLp {
-        StandardFormLp::new(array![[-1.0, 1.0]], array![1.0], array![-1.0, 0.0]).unwrap()
-    }
-
-    fn example_lp() -> StandardFormLp {
-        StandardFormLp::new(
-            array![[2.0, 1.0, 1.0], [1.0, 3.0, 0.0]],
-            array![1.0, 1.0],
-            array![5.0, 4.0, 1.0],
-        )
-        .unwrap()
-    }
-}
+mod tests;

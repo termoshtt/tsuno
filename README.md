@@ -101,6 +101,10 @@ the revised simplex iteration loop.
   - Name: `RevisedSimplex::step`.
 - [x] Represent iteration outcomes such as optimal, unbounded, and pivoted.
   - Name: `SimplexStep`.
+- [x] Solve by repeatedly applying revised simplex steps.
+  - Name: `RevisedSimplex::solve`.
+- [x] Represent solve outcomes and optimal solutions.
+  - Names: `SimplexSolveResult` and `SimplexSolution`.
 - [ ] Implement Phase I or another explicit feasible-basis construction path.
 
 # License

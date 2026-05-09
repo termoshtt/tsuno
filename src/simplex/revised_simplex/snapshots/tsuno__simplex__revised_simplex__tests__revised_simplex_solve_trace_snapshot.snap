@@ -1,0 +1,24 @@
+---
+source: src/simplex/revised_simplex/tests.rs
+expression: trace
+---
+iteration 0
+basis before: [2, 3]
+outcome: pivoted
+entering column: 1 (reduced_cost: -2)
+leaving column: 3 (step_length: 3)
+direction: [0, 1]
+basis after: [2, 1]
+
+iteration 1
+basis before: [2, 1]
+outcome: pivoted
+entering column: 0 (reduced_cost: -1)
+leaving column: 2 (step_length: 4)
+direction: [1, 0]
+basis after: [0, 1]
+
+iteration 2
+basis before: [0, 1]
+outcome: optimal
+basis after: [0, 1]
