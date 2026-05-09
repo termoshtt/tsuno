@@ -550,6 +550,103 @@ mod tests {
         assert_eq!(error, SimplexError::IterationLimit { limit: 1 });
     }
 
+    #[test]
+    fn revised_simplex_solve_trace_snapshot() {
+        let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
+
+        insta::assert_snapshot!(solve_trace(&mut simplex, 8));
+    }
+
+    fn solve_trace(simplex: &mut RevisedSimplex, max_iterations: usize) -> String {
+        let mut trace = Vec::new();
+
+        for iteration in 0..max_iterations {
+            let basis_before = simplex.basis().indices().to_vec();
+            let step = simplex.step().unwrap();
+            let basis_after = simplex.basis().indices().to_vec();
+            trace.push(format_step(
+                iteration,
+                &basis_before,
+                &step,
+                &basis_after,
+            ));
+
+            if matches!(step, SimplexStep::Optimal | SimplexStep::Unbounded { .. }) {
+                break;
+            }
+        }
+
+        trace.join("\n\n")
+    }
+
+    fn format_step(
+        iteration: usize,
+        basis_before: &[usize],
+        step: &SimplexStep,
+        basis_after: &[usize],
+    ) -> String {
+        match step {
+            SimplexStep::Optimal => format!(
+                "iteration {iteration}\n\
+                 basis before: {basis_before:?}\n\
+                 outcome: optimal\n\
+                 basis after: {basis_after:?}"
+            ),
+            SimplexStep::Unbounded {
+                entering,
+                direction,
+            } => format!(
+                "iteration {iteration}\n\
+                 basis before: {basis_before:?}\n\
+                 outcome: unbounded\n\
+                 entering column: {} (reduced_cost: {})\n\
+                 direction: {}\n\
+                 basis after: {basis_after:?}",
+                entering.column,
+                format_number(entering.reduced_cost),
+                format_array(direction)
+            ),
+            SimplexStep::Pivoted {
+                entering,
+                leaving,
+                direction,
+            } => format!(
+                "iteration {iteration}\n\
+                 basis before: {basis_before:?}\n\
+                 outcome: pivoted\n\
+                 entering column: {} (reduced_cost: {})\n\
+                 leaving column: {} (step_length: {})\n\
+                 direction: {}\n\
+                 basis after: {basis_after:?}",
+                entering.column,
+                format_number(entering.reduced_cost),
+                leaving.column,
+                format_number(leaving.step_length),
+                format_array(direction)
+            ),
+        }
+    }
+
+    fn format_array(values: &Array1<f64>) -> String {
+        let values = values
+            .iter()
+            .map(|&value| format_number(value))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{values}]")
+    }
+
+    fn format_number(value: f64) -> String {
+        if value == 0.0 {
+            "0".to_string()
+        } else {
+            format!("{value:.6}")
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
+        }
+    }
+
     fn improving_slack_lp() -> StandardFormLp {
         StandardFormLp::new(
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
