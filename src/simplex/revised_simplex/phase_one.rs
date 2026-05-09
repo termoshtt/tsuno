@@ -62,7 +62,7 @@ enum PhaseOneResult {
 /// the resulting basis can be converted to an original feasible basis for
 /// Phase II.
 pub struct PhaseOneAuxiliaryProblem {
-    lp: StandardFormLp,
+    auxiliary_lp: StandardFormLp,
     original_column_count: usize,
     initial_basis_indices: Vec<usize>,
 }
@@ -75,14 +75,14 @@ impl PhaseOneAuxiliaryProblem {
         let initial_basis_indices =
             (original_column_count..original_column_count + normalized.a().nrows()).collect();
         Self {
-            lp: auxiliary_lp,
+            auxiliary_lp,
             original_column_count,
             initial_basis_indices,
         }
     }
 
-    pub fn lp(&self) -> &StandardFormLp {
-        &self.lp
+    pub fn auxiliary_lp(&self) -> &StandardFormLp {
+        &self.auxiliary_lp
     }
 
     pub fn original_column_count(&self) -> usize {
@@ -95,7 +95,7 @@ impl PhaseOneAuxiliaryProblem {
 
     fn into_parts(self) -> (StandardFormLp, usize, Vec<usize>) {
         (
-            self.lp,
+            self.auxiliary_lp,
             self.original_column_count,
             self.initial_basis_indices,
         )
@@ -305,13 +305,17 @@ mod tests {
         assert_eq!(auxiliary.original_column_count(), 3);
         assert_eq!(auxiliary.initial_basis_indices(), &[3, 4]);
         assert_abs_diff_eq!(
-            auxiliary.lp().a(),
+            auxiliary.auxiliary_lp().a(),
             &array![[1.0, 1.0, 0.0, 1.0, 0.0], [1.0, 0.0, 1.0, 0.0, 1.0]],
             epsilon = 1.0e-9
         );
-        assert_abs_diff_eq!(auxiliary.lp().b(), &array![1.0, 0.25], epsilon = 1.0e-9);
         assert_abs_diff_eq!(
-            auxiliary.lp().c(),
+            auxiliary.auxiliary_lp().b(),
+            &array![1.0, 0.25],
+            epsilon = 1.0e-9
+        );
+        assert_abs_diff_eq!(
+            auxiliary.auxiliary_lp().c(),
             &array![0.0, 0.0, 0.0, 1.0, 1.0],
             epsilon = 1.0e-9
         );
