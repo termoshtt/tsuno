@@ -48,29 +48,12 @@ pub enum PhaseOneResult {
 ///
 /// where $D$ is a diagonal row-sign matrix chosen so that $D b \ge 0$.
 /// If the Phase I optimum is positive, the original LP is infeasible. If it is
-/// zero, the resulting feasible original basis is used to start Phase II via
-/// [`RevisedSimplex::solve`].
-pub fn solve(lp: StandardFormLp) -> Result<SimplexResult, super::SimplexError> {
-    solve_impl(lp, RevisedSimplexOptions::default(), &mut NoTrace)
-}
-
-/// Solve a standard-form LP while recording both Phase I and Phase II steps.
-pub fn solve_with_trace(
-    lp: StandardFormLp,
-    trace: &mut impl SimplexTrace,
-) -> Result<SimplexResult, super::SimplexError> {
-    solve_impl(lp, RevisedSimplexOptions::default(), trace)
-}
-
-/// Solve a standard-form LP with caller-provided simplex options.
-pub fn solve_with_options(
-    lp: StandardFormLp,
-    options: RevisedSimplexOptions,
-) -> Result<SimplexResult, super::SimplexError> {
-    solve_impl(lp, options, &mut NoTrace)
-}
-
-fn solve_impl(
+/// zero, the resulting feasible original basis is used to start Phase II.
+///
+/// The top-level solver exposes one full-featured entry point. Pass
+/// [`RevisedSimplexOptions::default`] for default tolerances and iteration
+/// limits, and pass [`NoTrace`] when no trace collection is needed.
+pub fn solve(
     lp: StandardFormLp,
     options: RevisedSimplexOptions,
     trace: &mut impl SimplexTrace,
@@ -96,7 +79,7 @@ pub fn find_feasible_basis(
 }
 
 /// Run Phase I feasible-basis construction while recording simplex steps.
-pub fn find_feasible_basis_with_trace(
+fn find_feasible_basis_with_trace(
     lp: &StandardFormLp,
     options: RevisedSimplexOptions,
     trace: &mut impl SimplexTrace,
@@ -243,7 +226,7 @@ mod tests {
     use ndarray::array;
 
     use super::*;
-    use crate::simplex::FullTrace;
+    use crate::simplex::{FullTrace, NoTrace};
 
     #[test]
     fn phase_one_finds_original_feasible_basis() {
@@ -264,7 +247,12 @@ mod tests {
 
     #[test]
     fn simplex_solve_uses_phase_one_basis_for_phase_two() {
-        let result = solve(feasible_lp_without_slack_basis()).unwrap();
+        let result = solve(
+            feasible_lp_without_slack_basis(),
+            RevisedSimplexOptions::default(),
+            &mut NoTrace,
+        )
+        .unwrap();
 
         match result {
             SimplexResult::Optimal(solution) => {
@@ -279,7 +267,12 @@ mod tests {
     fn simplex_solve_with_trace_records_phase_one_and_phase_two() {
         let mut trace = FullTrace::default();
 
-        let result = solve_with_trace(feasible_lp_without_slack_basis(), &mut trace).unwrap();
+        let result = solve(
+            feasible_lp_without_slack_basis(),
+            RevisedSimplexOptions::default(),
+            &mut trace,
+        )
+        .unwrap();
 
         assert!(matches!(result, SimplexResult::Optimal(_)));
         insta::assert_snapshot!(trace);
@@ -294,7 +287,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = solve(lp).unwrap();
+        let result = solve(lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
 
         match result {
             SimplexResult::Infeasible(infeasible) => {
@@ -308,7 +301,7 @@ mod tests {
     fn simplex_solve_reports_phase_two_unbounded() {
         let lp = StandardFormLp::new(array![[-1.0, 1.0]], array![1.0], array![-1.0, 0.0]).unwrap();
 
-        let result = solve(lp).unwrap();
+        let result = solve(lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
 
         match result {
             SimplexResult::Unbounded {
@@ -332,7 +325,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = solve(lp).unwrap();
+        let result = solve(lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
 
         match result {
             SimplexResult::Optimal(solution) => {
@@ -345,12 +338,13 @@ mod tests {
 
     #[test]
     fn simplex_solve_reports_phase_one_iteration_limit() {
-        let result = solve_with_options(
+        let result = solve(
             feasible_lp_without_slack_basis(),
             RevisedSimplexOptions {
                 max_iterations: 0,
                 ..RevisedSimplexOptions::default()
             },
+            &mut NoTrace,
         )
         .unwrap();
 
