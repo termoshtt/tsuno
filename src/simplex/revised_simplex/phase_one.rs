@@ -318,13 +318,68 @@ mod tests {
     }
 
     #[test]
-    fn simplex_solve_reports_infeasible_from_phase_one() {
-        let lp = StandardFormLp::new(
-            array![[1.0, 0.0], [1.0, 0.0]],
-            array![1.0, 2.0],
-            array![0.0, 0.0],
+    fn simplex_solve_records_infeasible_trace() {
+        let lp = infeasible_lp();
+        let mut trace = FullTrace::default();
+
+        let result = solve(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+
+        assert!(matches!(result, SimplexResult::Infeasible(_)));
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn simplex_solve_records_unbounded_trace() {
+        let mut trace = FullTrace::default();
+
+        let result = solve(unbounded_lp(), RevisedSimplexOptions::default(), &mut trace).unwrap();
+
+        assert!(matches!(result, SimplexResult::Unbounded { .. }));
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn simplex_solve_records_phase_one_iteration_limit_trace() {
+        let mut trace = FullTrace::default();
+
+        let result = solve(
+            feasible_lp_without_slack_basis(),
+            RevisedSimplexOptions {
+                max_iterations: 0,
+                ..RevisedSimplexOptions::default()
+            },
+            &mut trace,
         )
         .unwrap();
+
+        assert!(matches!(result, SimplexResult::PhaseOneIterationLimit(_)));
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn simplex_solve_records_phase_two_iteration_limit_trace() {
+        let mut trace = FullTrace::default();
+
+        let result = solve(
+            phase_two_iteration_limit_lp(),
+            RevisedSimplexOptions {
+                max_iterations: 1,
+                ..RevisedSimplexOptions::default()
+            },
+            &mut trace,
+        )
+        .unwrap();
+
+        assert!(
+            matches!(result, SimplexResult::IterationLimit(_)),
+            "expected Phase II iteration limit, got {result:?}"
+        );
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn simplex_solve_reports_infeasible_from_phase_one() {
+        let lp = infeasible_lp();
 
         let result = solve(lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
 
@@ -338,9 +393,12 @@ mod tests {
 
     #[test]
     fn simplex_solve_reports_phase_two_unbounded() {
-        let lp = StandardFormLp::new(array![[-1.0, 1.0]], array![1.0], array![-1.0, 0.0]).unwrap();
-
-        let result = solve(lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
+        let result = solve(
+            unbounded_lp(),
+            RevisedSimplexOptions::default(),
+            &mut NoTrace,
+        )
+        .unwrap();
 
         match result {
             SimplexResult::Unbounded {
@@ -405,6 +463,28 @@ mod tests {
             array![[1.0, 1.0, 0.0], [1.0, 0.0, 1.0]],
             array![1.0, 0.25],
             array![-1.0, -1.0, 0.0],
+        )
+        .unwrap()
+    }
+
+    fn infeasible_lp() -> StandardFormLp {
+        StandardFormLp::new(
+            array![[1.0, 0.0], [1.0, 0.0]],
+            array![1.0, 2.0],
+            array![0.0, 0.0],
+        )
+        .unwrap()
+    }
+
+    fn unbounded_lp() -> StandardFormLp {
+        StandardFormLp::new(array![[-1.0, 1.0]], array![1.0], array![-1.0, 0.0]).unwrap()
+    }
+
+    fn phase_two_iteration_limit_lp() -> StandardFormLp {
+        StandardFormLp::new(
+            array![[-1.0, -2.0, -3.0]],
+            array![0.0],
+            array![3.0, 0.0, 1.0],
         )
         .unwrap()
     }

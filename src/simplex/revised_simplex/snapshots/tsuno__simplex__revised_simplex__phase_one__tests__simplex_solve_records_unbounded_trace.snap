@@ -1,0 +1,26 @@
+---
+source: src/simplex/revised_simplex/phase_one.rs
+expression: trace
+---
+phase: phase one
+iteration 0
+basis before: [2]
+outcome: pivoted
+entering column: 1 (reduced_cost: -1)
+leaving column: 2 (step_length: 1)
+direction: [1]
+basis after: [1]
+
+phase: phase one
+iteration 1
+basis before: [1]
+outcome: optimal
+basis after: [1]
+
+phase: phase two
+iteration 0
+basis before: [1]
+outcome: unbounded
+entering column: 0 (reduced_cost: -1)
+direction: [-1]
+basis after: [1]
