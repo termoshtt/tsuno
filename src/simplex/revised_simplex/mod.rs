@@ -82,6 +82,7 @@ pub struct SimplexSolution {
 /// Outcome of repeatedly applying revised simplex steps.
 pub enum SimplexSolveResult {
     Optimal(SimplexSolution),
+    IterationLimit(SimplexSolution),
     Unbounded {
         entering: PricedColumn,
         direction: Array1<f64>,
@@ -92,7 +93,6 @@ pub enum SimplexSolveResult {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SimplexError {
     Problem(StandardFormError),
-    IterationLimit { limit: usize },
 }
 
 impl From<StandardFormError> for SimplexError {
@@ -290,9 +290,14 @@ impl RevisedSimplex {
     /// $$
     ///
     /// has no positive component above the pivot tolerance, the problem is
-    /// reported as unbounded in that direction. If neither condition occurs
-    /// before [`RevisedSimplexOptions::max_iterations`] step attempts, this
-    /// returns [`SimplexError::IterationLimit`].
+    /// reported as unbounded in that direction.
+    ///
+    /// If neither condition occurs before
+    /// [`RevisedSimplexOptions::max_iterations`] step attempts, this returns
+    /// [`SimplexSolveResult::IterationLimit`] with the current basic solution.
+    /// That result is deliberately distinct from [`SimplexSolveResult::Optimal`]:
+    /// the solver has a valid current basis and solution, but has not proved
+    /// optimality.
     pub fn solve(&mut self) -> Result<SimplexSolveResult, SimplexError> {
         self.solve_with_trace(&mut NoTrace)
     }
@@ -330,9 +335,9 @@ impl RevisedSimplex {
             }
         }
 
-        Err(SimplexError::IterationLimit {
-            limit: self.options.max_iterations,
-        })
+        Ok(SimplexSolveResult::IterationLimit(
+            self.current_solution(self.options.max_iterations)?,
+        ))
     }
 
     fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {

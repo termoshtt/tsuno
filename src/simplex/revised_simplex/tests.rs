@@ -170,7 +170,7 @@ fn revised_simplex_solve_returns_unbounded_result() {
 }
 
 #[test]
-fn revised_simplex_solve_reports_iteration_limit() {
+fn revised_simplex_solve_returns_iteration_limit_solution() {
     let mut simplex = RevisedSimplex::with_options(
         improving_slack_lp(),
         vec![2, 3],
@@ -181,9 +181,56 @@ fn revised_simplex_solve_reports_iteration_limit() {
     )
     .unwrap();
 
-    let error = simplex.solve().unwrap_err();
+    let result = simplex.solve().unwrap();
 
-    assert_eq!(error, SimplexError::IterationLimit { limit: 1 });
+    match result {
+        SimplexSolveResult::IterationLimit(solution) => {
+            assert_abs_diff_eq!(
+                solution.primal,
+                array![0.0, 3.0, 4.0, 0.0],
+                epsilon = 1.0e-9
+            );
+            assert_abs_diff_eq!(solution.objective_value, -6.0, epsilon = 1.0e-9);
+            assert_eq!(solution.basis_indices, vec![2, 1]);
+            assert_eq!(solution.iterations, 1);
+        }
+        _ => panic!("expected an iteration-limit solution"),
+    }
+}
+
+#[test]
+fn revised_simplex_can_continue_after_iteration_limit() {
+    let mut simplex = RevisedSimplex::with_options(
+        improving_slack_lp(),
+        vec![2, 3],
+        RevisedSimplexOptions {
+            max_iterations: 1,
+            ..RevisedSimplexOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(
+        simplex.solve().unwrap(),
+        SimplexSolveResult::IterationLimit(_)
+    ));
+    assert!(matches!(
+        simplex.solve().unwrap(),
+        SimplexSolveResult::IterationLimit(_)
+    ));
+    let result = simplex.solve().unwrap();
+
+    match result {
+        SimplexSolveResult::Optimal(solution) => {
+            assert_abs_diff_eq!(
+                solution.primal,
+                array![4.0, 3.0, 0.0, 0.0],
+                epsilon = 1.0e-9
+            );
+            assert_eq!(solution.basis_indices, vec![0, 1]);
+        }
+        _ => panic!("expected continuation to reach optimality"),
+    }
 }
 
 #[test]
