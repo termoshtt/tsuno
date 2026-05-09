@@ -97,6 +97,25 @@ impl From<StandardFormError> for SimplexError {
     }
 }
 
+pub trait SimplexTrace {
+    fn step_completed(&mut self, event: SimplexTraceEvent<'_>);
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NoTrace;
+
+impl SimplexTrace for NoTrace {
+    fn step_completed(&mut self, _event: SimplexTraceEvent<'_>) {}
+}
+
+#[derive(Clone, Debug)]
+pub struct SimplexTraceEvent<'a> {
+    pub iteration: usize,
+    pub basis_before: &'a [usize],
+    pub step: &'a SimplexStep,
+    pub basis_after: &'a [usize],
+}
+
 #[katexit::katexit]
 /// State for the revised simplex method.
 ///
@@ -292,6 +311,46 @@ impl RevisedSimplex {
     pub fn solve(&mut self) -> Result<SimplexSolveResult, SimplexError> {
         for iteration in 0..self.options.max_iterations {
             match self.step()? {
+                SimplexStep::Optimal => {
+                    return Ok(SimplexSolveResult::Optimal(
+                        self.current_solution(iteration)?,
+                    ));
+                }
+                SimplexStep::Unbounded {
+                    entering,
+                    direction,
+                } => {
+                    return Ok(SimplexSolveResult::Unbounded {
+                        entering,
+                        direction,
+                        iterations: iteration,
+                    });
+                }
+                SimplexStep::Pivoted { .. } => {}
+            }
+        }
+
+        Err(SimplexError::IterationLimit {
+            limit: self.options.max_iterations,
+        })
+    }
+
+    pub fn solve_with_trace(
+        &mut self,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<SimplexSolveResult, SimplexError> {
+        for iteration in 0..self.options.max_iterations {
+            let basis_before = self.basis.indices().to_vec();
+            let step = self.step()?;
+            let basis_after = self.basis.indices().to_vec();
+            trace.step_completed(SimplexTraceEvent {
+                iteration,
+                basis_before: &basis_before,
+                step: &step,
+                basis_after: &basis_after,
+            });
+
+            match step {
                 SimplexStep::Optimal => {
                     return Ok(SimplexSolveResult::Optimal(
                         self.current_solution(iteration)?,
@@ -553,76 +612,77 @@ mod tests {
     #[test]
     fn revised_simplex_solve_trace_snapshot() {
         let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
+        let mut trace = TextTrace::default();
 
-        insta::assert_snapshot!(solve_trace(&mut simplex, 8));
+        let result = simplex.solve_with_trace(&mut trace).unwrap();
+
+        assert!(matches!(result, SimplexSolveResult::Optimal(_)));
+        insta::assert_snapshot!(trace.finish());
     }
 
-    fn solve_trace(simplex: &mut RevisedSimplex, max_iterations: usize) -> String {
-        let mut trace = Vec::new();
+    #[derive(Default)]
+    struct TextTrace {
+        steps: Vec<String>,
+    }
 
-        for iteration in 0..max_iterations {
-            let basis_before = simplex.basis().indices().to_vec();
-            let step = simplex.step().unwrap();
-            let basis_after = simplex.basis().indices().to_vec();
-            trace.push(format_step(
-                iteration,
-                &basis_before,
-                &step,
-                &basis_after,
-            ));
-
-            if matches!(step, SimplexStep::Optimal | SimplexStep::Unbounded { .. }) {
-                break;
-            }
+    impl SimplexTrace for TextTrace {
+        fn step_completed(&mut self, event: SimplexTraceEvent<'_>) {
+            self.steps.push(format_step(event));
         }
-
-        trace.join("\n\n")
     }
 
-    fn format_step(
-        iteration: usize,
-        basis_before: &[usize],
-        step: &SimplexStep,
-        basis_after: &[usize],
-    ) -> String {
-        match step {
+    impl TextTrace {
+        fn finish(self) -> String {
+            self.steps.join("\n\n")
+        }
+    }
+
+    fn format_step(event: SimplexTraceEvent<'_>) -> String {
+        match event.step {
             SimplexStep::Optimal => format!(
-                "iteration {iteration}\n\
-                 basis before: {basis_before:?}\n\
+                "iteration {}\n\
+                 basis before: {:?}\n\
                  outcome: optimal\n\
-                 basis after: {basis_after:?}"
+                 basis after: {:?}",
+                event.iteration, event.basis_before, event.basis_after
             ),
             SimplexStep::Unbounded {
                 entering,
                 direction,
             } => format!(
-                "iteration {iteration}\n\
-                 basis before: {basis_before:?}\n\
+                "iteration {}\n\
+                 basis before: {:?}\n\
                  outcome: unbounded\n\
                  entering column: {} (reduced_cost: {})\n\
                  direction: {}\n\
-                 basis after: {basis_after:?}",
+                 basis after: {:?}",
+                event.iteration,
+                event.basis_before,
                 entering.column,
                 format_number(entering.reduced_cost),
-                format_array(direction)
+                format_array(direction),
+                event.basis_after
             ),
             SimplexStep::Pivoted {
                 entering,
                 leaving,
                 direction,
             } => format!(
-                "iteration {iteration}\n\
-                 basis before: {basis_before:?}\n\
+                "iteration {}\n\
+                 basis before: {:?}\n\
                  outcome: pivoted\n\
                  entering column: {} (reduced_cost: {})\n\
                  leaving column: {} (step_length: {})\n\
                  direction: {}\n\
-                 basis after: {basis_after:?}",
+                 basis after: {:?}",
+                event.iteration,
+                event.basis_before,
                 entering.column,
                 format_number(entering.reduced_cost),
                 leaving.column,
                 format_number(leaving.step_length),
-                format_array(direction)
+                format_array(direction),
+                event.basis_after
             ),
         }
     }

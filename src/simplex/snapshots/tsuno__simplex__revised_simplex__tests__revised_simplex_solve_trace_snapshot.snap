@@ -1,6 +1,6 @@
 ---
 source: src/simplex/revised_simplex.rs
-expression: "solve_trace(&mut simplex, 8)"
+expression: "trace.finish()"
 ---
 iteration 0
 basis before: [2, 3]
