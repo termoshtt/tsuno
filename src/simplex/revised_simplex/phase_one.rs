@@ -4,13 +4,17 @@ use super::{
     RevisedSimplex, RevisedSimplexOptions, SimplexSolution, SimplexSolveResult, SimplexTrace,
     SimplexTracePhase,
 };
-use crate::simplex::StandardFormLp;
+use crate::simplex::{FarkasCertificate, StandardFormError, StandardFormLp};
 
 #[derive(Clone, Debug, PartialEq)]
 /// Infeasibility detected by the Phase I auxiliary problem.
+///
+/// The `certificate` field is a Farkas certificate for the original
+/// standard-form LP, not for the auxiliary Phase I problem.
 pub struct PhaseOneInfeasible {
     pub objective_value: f64,
     pub iterations: usize,
+    pub certificate: FarkasCertificate,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,19 +79,21 @@ pub struct PhaseOneAuxiliaryProblem {
     auxiliary_lp: StandardFormLp,
     original_column_count: usize,
     initial_basis_indices: Vec<usize>,
+    row_signs: Vec<f64>,
 }
 
 impl PhaseOneAuxiliaryProblem {
     pub fn new(lp: &StandardFormLp) -> Self {
         let normalized = normalize_rows(lp);
-        let original_column_count = normalized.a().ncols();
-        let auxiliary_lp = build_auxiliary_lp(&normalized);
+        let original_column_count = normalized.lp.a().ncols();
+        let auxiliary_lp = build_auxiliary_lp(&normalized.lp);
         let initial_basis_indices =
-            (original_column_count..original_column_count + normalized.a().nrows()).collect();
+            (original_column_count..original_column_count + normalized.lp.a().nrows()).collect();
         Self {
             auxiliary_lp,
             original_column_count,
             initial_basis_indices,
+            row_signs: normalized.row_signs,
         }
     }
 
@@ -109,6 +115,8 @@ impl PhaseOneAuxiliaryProblem {
         options: RevisedSimplexOptions,
         trace: &mut impl SimplexTrace,
     ) -> Result<PhaseOneResult, PhaseOneError> {
+        let original_column_count = self.original_column_count;
+        let row_signs = self.row_signs;
         let mut simplex = RevisedSimplex::with_options(
             self.auxiliary_lp,
             self.initial_basis_indices,
@@ -123,9 +131,12 @@ impl PhaseOneAuxiliaryProblem {
         {
             SimplexSolveResult::Optimal(solution) => {
                 if solution.objective_value > options.pivot_tolerance {
+                    let certificate = farkas_certificate(&simplex, &row_signs)
+                        .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
                     return Ok(PhaseOneResult::Infeasible(PhaseOneInfeasible {
                         objective_value: solution.objective_value,
                         iterations: solution.iterations,
+                        certificate,
                     }));
                 }
 
@@ -134,7 +145,7 @@ impl PhaseOneAuxiliaryProblem {
                 // basis representation change, add a dedicated cleanup event.
                 pivot_out_artificial_columns(
                     &mut simplex,
-                    self.original_column_count,
+                    original_column_count,
                     options.pivot_tolerance,
                 )?;
                 let basis_indices = simplex.basis.indices().to_vec();
@@ -150,18 +161,42 @@ impl PhaseOneAuxiliaryProblem {
     }
 }
 
-fn normalize_rows(lp: &StandardFormLp) -> StandardFormLp {
+fn farkas_certificate(
+    simplex: &RevisedSimplex,
+    row_signs: &[f64],
+) -> Result<FarkasCertificate, StandardFormError> {
+    let auxiliary_dual = simplex.dual_variables()?;
+    let multiplier = Array1::from_iter(
+        auxiliary_dual
+            .iter()
+            .zip(row_signs.iter())
+            .map(|(&dual_value, &row_sign)| -row_sign * dual_value),
+    );
+    Ok(FarkasCertificate { multiplier })
+}
+
+struct NormalizedLp {
+    lp: StandardFormLp,
+    row_signs: Vec<f64>,
+}
+
+fn normalize_rows(lp: &StandardFormLp) -> NormalizedLp {
     let mut a = lp.a().clone();
     let mut b = lp.b().clone();
+    let mut row_signs = vec![1.0; b.len()];
     for row in 0..b.len() {
         if b[row] < 0.0 {
+            row_signs[row] = -1.0;
             b[row] = -b[row];
             for column in 0..a.ncols() {
                 a[[row, column]] = -a[[row, column]];
             }
         }
     }
-    StandardFormLp::new(a, b, lp.c().clone()).unwrap()
+    NormalizedLp {
+        lp: StandardFormLp::new(a, b, lp.c().clone()).unwrap(),
+        row_signs,
+    }
 }
 
 fn build_auxiliary_lp(lp: &StandardFormLp) -> StandardFormLp {
@@ -318,11 +353,38 @@ mod tests {
         let lp = infeasible_lp();
         let mut trace = FullTrace::default();
 
-        let result = solve(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let result = solve(lp.clone(), RevisedSimplexOptions::default(), &mut trace).unwrap();
 
         match result {
             SimplexResult::Infeasible(infeasible) => {
                 assert_abs_diff_eq!(infeasible.objective_value, 1.0, epsilon = 1.0e-9);
+                let verification = infeasible.certificate.verify(&lp, 1.0e-9).unwrap();
+                assert!(
+                    verification.valid,
+                    "expected valid certificate, got {verification:?}"
+                );
+            }
+            _ => panic!("expected infeasible result"),
+        }
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn simplex_solve_returns_farkas_certificate_with_normalized_rows() {
+        let lp = negative_rhs_infeasible_lp();
+        let mut trace = FullTrace::default();
+
+        let result = solve(lp.clone(), RevisedSimplexOptions::default(), &mut trace).unwrap();
+
+        match result {
+            SimplexResult::Infeasible(infeasible) => {
+                let verification = infeasible.certificate.verify(&lp, 1.0e-9).unwrap();
+                assert!(
+                    verification.valid,
+                    "expected valid certificate, got {verification:?}"
+                );
+                assert!(verification.minimum_column_value >= -1.0e-9);
+                assert!(verification.rhs_value < -1.0e-9);
             }
             _ => panic!("expected infeasible result"),
         }
@@ -433,6 +495,15 @@ mod tests {
         StandardFormLp::new(
             array![[1.0, 0.0], [1.0, 0.0]],
             array![1.0, 2.0],
+            array![0.0, 0.0],
+        )
+        .unwrap()
+    }
+
+    fn negative_rhs_infeasible_lp() -> StandardFormLp {
+        StandardFormLp::new(
+            array![[-1.0, 0.0], [1.0, 0.0]],
+            array![-1.0, 2.0],
             array![0.0, 0.0],
         )
         .unwrap()

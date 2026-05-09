@@ -109,11 +109,11 @@ b^T y < 0
 
 which proves that no feasible `x >= 0` can satisfy `A x = b`.
 
-- [ ] Add a `FarkasCertificate` type for standard-form LPs.
-- [ ] Add verification APIs that report `min(A^T y)` and `b^T y`.
-- [ ] Return a certificate from Phase I infeasible results.
-- [ ] Add tests that validate certificates produced by Phase I.
-- [ ] Keep the certificate API independent enough to support IIS construction.
+- [x] Add a `FarkasCertificate` type for standard-form LPs.
+- [x] Add verification APIs that report `min(A^T y)` and `b^T y`.
+- [x] Return a certificate from Phase I infeasible results.
+- [x] Add tests that validate certificates produced by Phase I.
+- [ ] Keep extending the certificate API for IIS construction.
 
 ### IIS Construction
 
