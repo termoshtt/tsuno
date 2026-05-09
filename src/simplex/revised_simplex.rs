@@ -98,6 +98,8 @@ impl From<StandardFormError> for SimplexError {
 }
 
 pub trait SimplexTrace {
+    fn step_started(&mut self, _iteration: usize, _basis: &[usize]) {}
+
     fn step_completed(&mut self, event: SimplexTraceEvent<'_>);
 }
 
@@ -111,7 +113,6 @@ impl SimplexTrace for NoTrace {
 #[derive(Clone, Debug)]
 pub struct SimplexTraceEvent<'a> {
     pub iteration: usize,
-    pub basis_before: &'a [usize],
     pub step: &'a SimplexStep,
     pub basis_after: &'a [usize],
 }
@@ -309,30 +310,7 @@ impl RevisedSimplex {
     /// before [`RevisedSimplexOptions::max_iterations`] step attempts, this
     /// returns [`SimplexError::IterationLimit`].
     pub fn solve(&mut self) -> Result<SimplexSolveResult, SimplexError> {
-        for iteration in 0..self.options.max_iterations {
-            match self.step()? {
-                SimplexStep::Optimal => {
-                    return Ok(SimplexSolveResult::Optimal(
-                        self.current_solution(iteration)?,
-                    ));
-                }
-                SimplexStep::Unbounded {
-                    entering,
-                    direction,
-                } => {
-                    return Ok(SimplexSolveResult::Unbounded {
-                        entering,
-                        direction,
-                        iterations: iteration,
-                    });
-                }
-                SimplexStep::Pivoted { .. } => {}
-            }
-        }
-
-        Err(SimplexError::IterationLimit {
-            limit: self.options.max_iterations,
-        })
+        self.solve_with_trace(&mut NoTrace)
     }
 
     pub fn solve_with_trace(
@@ -340,14 +318,12 @@ impl RevisedSimplex {
         trace: &mut impl SimplexTrace,
     ) -> Result<SimplexSolveResult, SimplexError> {
         for iteration in 0..self.options.max_iterations {
-            let basis_before = self.basis.indices().to_vec();
+            trace.step_started(iteration, self.basis.indices());
             let step = self.step()?;
-            let basis_after = self.basis.indices().to_vec();
             trace.step_completed(SimplexTraceEvent {
                 iteration,
-                basis_before: &basis_before,
                 step: &step,
-                basis_after: &basis_after,
+                basis_after: self.basis.indices(),
             });
 
             match step {
@@ -622,12 +598,18 @@ mod tests {
 
     #[derive(Default)]
     struct TextTrace {
+        basis_before: Option<String>,
         steps: Vec<String>,
     }
 
     impl SimplexTrace for TextTrace {
+        fn step_started(&mut self, _iteration: usize, basis: &[usize]) {
+            self.basis_before = Some(format!("{basis:?}"));
+        }
+
         fn step_completed(&mut self, event: SimplexTraceEvent<'_>) {
-            self.steps.push(format_step(event));
+            let basis_before = self.basis_before.take().unwrap();
+            self.steps.push(format_step(&basis_before, event));
         }
     }
 
@@ -637,27 +619,27 @@ mod tests {
         }
     }
 
-    fn format_step(event: SimplexTraceEvent<'_>) -> String {
+    fn format_step(basis_before: &str, event: SimplexTraceEvent<'_>) -> String {
         match event.step {
             SimplexStep::Optimal => format!(
                 "iteration {}\n\
-                 basis before: {:?}\n\
+                 basis before: {}\n\
                  outcome: optimal\n\
                  basis after: {:?}",
-                event.iteration, event.basis_before, event.basis_after
+                event.iteration, basis_before, event.basis_after
             ),
             SimplexStep::Unbounded {
                 entering,
                 direction,
             } => format!(
                 "iteration {}\n\
-                 basis before: {:?}\n\
+                 basis before: {}\n\
                  outcome: unbounded\n\
                  entering column: {} (reduced_cost: {})\n\
                  direction: {}\n\
                  basis after: {:?}",
                 event.iteration,
-                event.basis_before,
+                basis_before,
                 entering.column,
                 format_number(entering.reduced_cost),
                 format_array(direction),
@@ -669,14 +651,14 @@ mod tests {
                 direction,
             } => format!(
                 "iteration {}\n\
-                 basis before: {:?}\n\
+                 basis before: {}\n\
                  outcome: pivoted\n\
                  entering column: {} (reduced_cost: {})\n\
                  leaving column: {} (step_length: {})\n\
                  direction: {}\n\
                  basis after: {:?}",
                 event.iteration,
-                event.basis_before,
+                basis_before,
                 entering.column,
                 format_number(entering.reduced_cost),
                 leaving.column,
