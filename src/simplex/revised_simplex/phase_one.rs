@@ -129,6 +129,9 @@ impl PhaseOneAuxiliaryProblem {
                     }));
                 }
 
+                // This cleanup changes the basis after Phase I optimality, but
+                // it is not a simplex iteration. If traces need to explain every
+                // basis representation change, add a dedicated cleanup event.
                 pivot_out_artificial_columns(
                     &mut simplex,
                     self.original_column_count,
@@ -185,6 +188,9 @@ fn pivot_out_artificial_columns(
     original_column_count: usize,
     tolerance: f64,
 ) -> Result<(), PhaseOneError> {
+    // Rank-deficient or redundant-row cases can leave an artificial column with
+    // no original replacement. For now this is reported as a Phase I extraction
+    // failure; later redundant-row handling can make this path less strict.
     let mut position = 0;
     while position < simplex.basis.indices().len() {
         if simplex.basis.indices()[position] < original_column_count {
