@@ -2,8 +2,10 @@ use ndarray::Array1;
 
 use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
+mod phase_one;
 mod trace;
 
+pub use phase_one::*;
 pub use trace::*;
 
 #[derive(Clone, Debug)]
@@ -91,13 +93,35 @@ pub enum SimplexSolveResult {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Outcome of solving a standard-form LP from an automatically constructed
+/// initial basis.
+pub enum SimplexResult {
+    Optimal(SimplexSolution),
+    IterationLimit(SimplexSolution),
+    PhaseOneIterationLimit(SimplexSolution),
+    Infeasible(PhaseOneInfeasible),
+    Unbounded {
+        entering: PricedColumn,
+        direction: Array1<f64>,
+        iterations: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum SimplexError {
     Problem(StandardFormError),
+    PhaseOne(PhaseOneError),
 }
 
 impl From<StandardFormError> for SimplexError {
     fn from(error: StandardFormError) -> Self {
         SimplexError::Problem(error)
+    }
+}
+
+impl From<PhaseOneError> for SimplexError {
+    fn from(error: PhaseOneError) -> Self {
+        SimplexError::PhaseOne(error)
     }
 }
 

@@ -105,7 +105,15 @@ the revised simplex iteration loop.
   - Name: `RevisedSimplex::solve`.
 - [x] Represent solve outcomes and optimal solutions.
   - Names: `SimplexSolveResult` and `SimplexSolution`.
-- [ ] Implement Phase I or another explicit feasible-basis construction path.
+- [x] Implement Phase I feasible-basis construction.
+  - Name: `find_feasible_basis`, building and solving an auxiliary LP with
+    artificial variables.
+- [x] Provide a top-level standard-form solve path that does not require callers
+  to provide an initial basis.
+  - Name: `solve`, running Phase I first and then Phase II primal simplex.
+- [x] Represent top-level outcomes including infeasibility discovered by Phase
+  I.
+  - Name: `SimplexResult`.
 
 # License
 Copyright (c) 2026 Toshiki Teramura (@termoshtt)
