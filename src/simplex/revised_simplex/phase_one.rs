@@ -238,14 +238,15 @@ mod tests {
     use ndarray::array;
 
     use super::*;
-    use crate::simplex::{FullTrace, NoTrace, SimplexResult, solve};
+    use crate::simplex::{FullTrace, SimplexResult, solve};
 
     #[test]
     fn phase_one_returns_original_feasible_basis() {
         let lp = feasible_lp_without_slack_basis();
+        let mut trace = FullTrace::default();
 
         let result = PhaseOneAuxiliaryProblem::new(&lp)
-            .solve(RevisedSimplexOptions::default(), &mut NoTrace)
+            .solve(RevisedSimplexOptions::default(), &mut trace)
             .unwrap();
 
         match result {
@@ -257,6 +258,7 @@ mod tests {
             }
             _ => panic!("expected a feasible basis"),
         }
+        insta::assert_snapshot!(trace);
     }
 
     #[test]
@@ -285,24 +287,6 @@ mod tests {
     }
 
     #[test]
-    fn simplex_solve_uses_phase_one_basis_for_phase_two() {
-        let result = solve(
-            feasible_lp_without_slack_basis(),
-            RevisedSimplexOptions::default(),
-            &mut NoTrace,
-        )
-        .unwrap();
-
-        match result {
-            SimplexResult::Optimal(solution) => {
-                assert_abs_diff_eq!(solution.primal, array![0.25, 0.75, 0.0], epsilon = 1.0e-9);
-                assert_abs_diff_eq!(solution.objective_value, -1.0, epsilon = 1.0e-9);
-            }
-            _ => panic!("expected an optimal solution"),
-        }
-    }
-
-    #[test]
     fn simplex_solve_records_phase_one_and_phase_two_trace() {
         let mut trace = FullTrace::default();
 
@@ -313,7 +297,13 @@ mod tests {
         )
         .unwrap();
 
-        assert!(matches!(result, SimplexResult::Optimal(_)));
+        match result {
+            SimplexResult::Optimal(solution) => {
+                assert_abs_diff_eq!(solution.primal, array![0.25, 0.75, 0.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.objective_value, -1.0, epsilon = 1.0e-9);
+            }
+            _ => panic!("expected an optimal solution"),
+        }
         insta::assert_snapshot!(trace);
     }
 
@@ -324,7 +314,12 @@ mod tests {
 
         let result = solve(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
 
-        assert!(matches!(result, SimplexResult::Infeasible(_)));
+        match result {
+            SimplexResult::Infeasible(infeasible) => {
+                assert_abs_diff_eq!(infeasible.objective_value, 1.0, epsilon = 1.0e-9);
+            }
+            _ => panic!("expected infeasible result"),
+        }
         insta::assert_snapshot!(trace);
     }
 
@@ -334,7 +329,17 @@ mod tests {
 
         let result = solve(unbounded_lp(), RevisedSimplexOptions::default(), &mut trace).unwrap();
 
-        assert!(matches!(result, SimplexResult::Unbounded { .. }));
+        match result {
+            SimplexResult::Unbounded {
+                entering,
+                direction,
+                ..
+            } => {
+                assert_eq!(entering.column, 0);
+                assert_abs_diff_eq!(direction, array![-1.0], epsilon = 1.0e-9);
+            }
+            _ => panic!("expected an unbounded result"),
+        }
         insta::assert_snapshot!(trace);
     }
 
@@ -352,7 +357,17 @@ mod tests {
         )
         .unwrap();
 
-        assert!(matches!(result, SimplexResult::PhaseOneIterationLimit(_)));
+        match result {
+            SimplexResult::PhaseOneIterationLimit(limit) => {
+                assert_eq!(limit.auxiliary_solution.basis_indices, vec![3, 4]);
+                assert_abs_diff_eq!(
+                    limit.auxiliary_solution.objective_value,
+                    1.25,
+                    epsilon = 1.0e-9
+                );
+            }
+            _ => panic!("expected a Phase I iteration-limit result"),
+        }
         insta::assert_snapshot!(trace);
     }
 
@@ -378,42 +393,6 @@ mod tests {
     }
 
     #[test]
-    fn simplex_solve_reports_infeasible_from_phase_one() {
-        let lp = infeasible_lp();
-
-        let result = solve(lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
-
-        match result {
-            SimplexResult::Infeasible(infeasible) => {
-                assert_abs_diff_eq!(infeasible.objective_value, 1.0, epsilon = 1.0e-9);
-            }
-            _ => panic!("expected infeasible result"),
-        }
-    }
-
-    #[test]
-    fn simplex_solve_reports_phase_two_unbounded() {
-        let result = solve(
-            unbounded_lp(),
-            RevisedSimplexOptions::default(),
-            &mut NoTrace,
-        )
-        .unwrap();
-
-        match result {
-            SimplexResult::Unbounded {
-                entering,
-                direction,
-                ..
-            } => {
-                assert_eq!(entering.column, 0);
-                assert_abs_diff_eq!(direction, array![-1.0], epsilon = 1.0e-9);
-            }
-            _ => panic!("expected an unbounded result"),
-        }
-    }
-
-    #[test]
     fn simplex_solve_normalizes_negative_right_hand_side() {
         let lp = StandardFormLp::new(
             array![[-1.0, 1.0], [0.0, 1.0]],
@@ -421,8 +400,9 @@ mod tests {
             array![1.0, 0.0],
         )
         .unwrap();
+        let mut trace = FullTrace::default();
 
-        let result = solve(lp, RevisedSimplexOptions::default(), &mut NoTrace).unwrap();
+        let result = solve(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
 
         match result {
             SimplexResult::Optimal(solution) => {
@@ -431,31 +411,7 @@ mod tests {
             }
             _ => panic!("expected an optimal solution"),
         }
-    }
-
-    #[test]
-    fn simplex_solve_reports_phase_one_iteration_limit() {
-        let result = solve(
-            feasible_lp_without_slack_basis(),
-            RevisedSimplexOptions {
-                max_iterations: 0,
-                ..RevisedSimplexOptions::default()
-            },
-            &mut NoTrace,
-        )
-        .unwrap();
-
-        match result {
-            SimplexResult::PhaseOneIterationLimit(limit) => {
-                assert_eq!(limit.auxiliary_solution.basis_indices, vec![3, 4]);
-                assert_abs_diff_eq!(
-                    limit.auxiliary_solution.objective_value,
-                    1.25,
-                    epsilon = 1.0e-9
-                );
-            }
-            _ => panic!("expected a Phase I iteration-limit result"),
-        }
+        insta::assert_snapshot!(trace);
     }
 
     fn feasible_lp_without_slack_basis() -> StandardFormLp {
