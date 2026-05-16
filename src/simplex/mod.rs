@@ -6,10 +6,7 @@ mod standard_form;
 
 pub use basis::*;
 pub use dual::DualRevisedSimplex;
-pub use primal::{
-    PhaseOneAuxiliaryProblem, PhaseOneError, PhaseOneInfeasible, PhaseOneIterationLimit,
-    RevisedSimplex,
-};
+pub use primal::RevisedSimplex;
 pub use revised_simplex::{
     FullTrace, FullTraceOutcome, FullTraceStep, NoTrace, RevisedSimplexOptions, SimplexError,
     SimplexResult, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTracePhase, solve,
