@@ -3,7 +3,7 @@ use ndarray::Array1;
 use super::{
     RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTraceStep,
 };
-use crate::simplex::{Basis, PricedColumn, StandardFormError, StandardFormLp};
+use crate::simplex::{Basis, FarkasCertificate, PricedColumn, StandardFormError, StandardFormLp};
 
 #[derive(Clone, Debug, PartialEq)]
 #[katexit::katexit]
@@ -74,6 +74,7 @@ pub enum SolveResult {
     Infeasible {
         leaving: LeavingBasicVariable,
         pivot_row: Array1<f64>,
+        certificate: FarkasCertificate,
         iterations: usize,
     },
 }
@@ -268,10 +269,34 @@ impl DualRevisedSimplex {
         &self,
         leaving: &LeavingBasicVariable,
     ) -> Result<Array1<f64>, StandardFormError> {
+        let row_multiplier = self.infeasibility_certificate(leaving).multiplier;
+        Ok(self.lp.a().t().dot(&row_multiplier))
+    }
+
+    /// Build the Farkas multiplier associated with a dual infeasible row.
+    ///
+    /// For a leaving basis position $p$, this returns
+    ///
+    /// $$
+    /// u = B^{-T} e_p.
+    /// $$
+    ///
+    /// If the corresponding pivot row $\alpha = A^T u$ has no eligible
+    /// entering nonbasis column, dual feasibility implies $A^T u \ge 0$.
+    /// Since the selected basic value is
+    ///
+    /// $$
+    /// (x_I)_p = e_p^T B^{-1} b = b^T B^{-T} e_p = b^T u < 0,
+    /// $$
+    ///
+    /// this $u$ is a Farkas certificate for infeasibility of
+    /// $Ax=b,\ x\ge 0$.
+    pub fn infeasibility_certificate(&self, leaving: &LeavingBasicVariable) -> FarkasCertificate {
         let mut unit = Array1::zeros(self.lp.a().nrows());
         unit[leaving.position] = 1.0;
-        let row_multiplier = self.basis.solve_transposed(&unit);
-        Ok(self.lp.a().t().dot(&row_multiplier))
+        FarkasCertificate {
+            multiplier: self.basis.solve_transposed(&unit),
+        }
     }
 
     /// Select the entering column using the dual minimum ratio test.
@@ -372,9 +397,11 @@ impl DualRevisedSimplex {
                     return Ok(SolveResult::Optimal(self.current_solution(iteration)?));
                 }
                 Step::Infeasible { leaving, pivot_row } => {
+                    let certificate = self.infeasibility_certificate(&leaving);
                     return Ok(SolveResult::Infeasible {
                         leaving,
                         pivot_row,
+                        certificate,
                         iterations: iteration,
                     });
                 }
@@ -722,6 +749,7 @@ mod tests {
             SolveResult::Infeasible {
                 leaving,
                 pivot_row,
+                certificate,
                 iterations,
             } => {
                 assert_eq!(
@@ -732,6 +760,13 @@ mod tests {
                     }
                 );
                 assert_abs_diff_eq!(pivot_row, array![1.0, 1.0, 0.0], epsilon = 1.0e-9);
+                let verification = certificate
+                    .verify(simplex.lp(), 1.0e-9)
+                    .expect("certificate should have the right dimension");
+                assert!(
+                    verification.valid,
+                    "expected valid certificate, got {verification:?}"
+                );
                 assert_eq!(iterations, 0);
             }
             _ => panic!("expected a dual simplex infeasible result"),
