@@ -14,9 +14,7 @@ use crate::simplex::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 /// x_I =
 /// \begin{bmatrix}
 /// x_{j_0} & \cdots & x_{j_{m-1}}
-/// \end{bmatrix}^T
-/// =
-/// B^{-1} b.
+/// \end{bmatrix}^T = B^{-1} b.
 /// $$
 ///
 /// Dual simplex repairs primal infeasibility by selecting a basis position
