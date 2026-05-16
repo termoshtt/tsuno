@@ -31,7 +31,7 @@ and provides the following pieces.
   - reduced costs `r_j = c_j - A_j^T y`
 - [x] Primal revised simplex step and solve loop.
 - [x] Phase I auxiliary problem with artificial variables.
-- [x] Top-level `simplex::solve` that runs Phase I and then Phase II.
+- [x] `simplex::primal::solve` that runs Phase I and then Phase II.
 - [x] Structured simplex traces for solver paths and snapshot tests.
 
 The LU update path currently uses eta updates. Forrest-Tomlin-style updates,
@@ -71,8 +71,7 @@ simple and testable, but it is not the final performance target.
 - [x] Implement basis-level revised simplex operations.
 - [x] Implement Phase I feasible-basis construction.
 - [x] Implement top-level primal solve for standard-form LPs.
-- [ ] Refine naming and module boundaries if dual simplex needs shared solver
-  state.
+- [x] Split primal-specific step types under `simplex::primal`.
 - [ ] Add optional fast paths for obvious feasible initial bases, such as slack
   bases, so top-level solve does not always need Phase I.
 
@@ -83,10 +82,11 @@ reuse the existing basis, basis solve, transposed solve, reduced-cost, and trace
 infrastructure.
 
 - [x] Represent a dual revised simplex solver state.
-- [ ] Select a leaving basis position from negative basic variables.
-- [ ] Compute the pivot row via a transposed basis solve.
-- [ ] Select an entering nonbasis column with the dual ratio test.
-- [ ] Implement one dual simplex pivot step.
+- [x] Select a leaving basis position from negative basic variables.
+- [x] Compute the pivot row via a transposed basis solve.
+- [x] Select an entering nonbasis column with the dual minimum ratio test.
+- [x] Implement one dual simplex pivot step.
+- [x] Place dual-specific step types under `simplex::dual`.
 - [ ] Implement the dual simplex solve loop and result type.
 - [ ] Share common basis-state and trace concepts with primal simplex where the
   API remains clear.

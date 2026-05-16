@@ -1,8 +1,8 @@
 use ndarray::{Array1, Array2};
 
-use super::{
-    RevisedSimplex, RevisedSimplexOptions, SimplexSolution, SimplexSolveResult, SimplexTrace,
-    SimplexTracePhase,
+use super::{RevisedSimplex, SolveResult};
+use crate::simplex::revised_simplex::{
+    RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTracePhase,
 };
 use crate::simplex::{FarkasCertificate, StandardFormError, StandardFormLp};
 
@@ -35,7 +35,7 @@ pub enum PhaseOneError {
 
 #[derive(Clone, Debug, PartialEq)]
 /// Result of Phase I feasible-basis construction.
-pub(super) enum PhaseOneResult {
+pub(crate) enum PhaseOneResult {
     Feasible { basis_indices: Vec<usize> },
     Infeasible(PhaseOneInfeasible),
     IterationLimit(PhaseOneIterationLimit),
@@ -110,7 +110,7 @@ impl PhaseOneAuxiliaryProblem {
     }
 
     /// Solve the auxiliary Phase I problem and extract an original feasible basis.
-    pub(super) fn solve(
+    pub(crate) fn solve(
         self,
         options: RevisedSimplexOptions,
         trace: &mut impl SimplexTrace,
@@ -129,7 +129,7 @@ impl PhaseOneAuxiliaryProblem {
             .solve(trace)
             .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?
         {
-            SimplexSolveResult::Optimal(solution) => {
+            SolveResult::Optimal(solution) => {
                 if solution.objective_value > options.pivot_tolerance {
                     let certificate = farkas_certificate(&simplex, &row_signs)
                         .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
@@ -151,12 +151,12 @@ impl PhaseOneAuxiliaryProblem {
                 let basis_indices = simplex.basis.indices().to_vec();
                 Ok(PhaseOneResult::Feasible { basis_indices })
             }
-            SimplexSolveResult::IterationLimit(solution) => {
+            SolveResult::IterationLimit(solution) => {
                 Ok(PhaseOneResult::IterationLimit(PhaseOneIterationLimit {
                     auxiliary_solution: solution,
                 }))
             }
-            SimplexSolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
+            SolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
         }
     }
 }
@@ -279,7 +279,8 @@ mod tests {
     use ndarray::array;
 
     use super::*;
-    use crate::simplex::{FullTrace, SimplexResult, solve};
+    use crate::simplex::primal::solve;
+    use crate::simplex::{FullTrace, SimplexResult};
 
     #[test]
     fn phase_one_returns_original_feasible_basis() {

@@ -2,7 +2,7 @@ use approx::assert_abs_diff_eq;
 use ndarray::array;
 
 use super::*;
-use crate::simplex::StandardFormLp;
+use crate::simplex::{FullTrace, StandardFormLp};
 
 #[test]
 fn revised_simplex_builds_basis_and_computes_basic_solution() {
@@ -15,7 +15,7 @@ fn revised_simplex_builds_basis_and_computes_basic_solution() {
 }
 
 #[test]
-fn revised_simplex_selects_entering_column_with_options() {
+fn revised_simplex_selects_most_negative_reduced_cost_with_options() {
     let simplex = RevisedSimplex::with_options(
         improving_slack_lp(),
         vec![2, 3],
@@ -26,7 +26,7 @@ fn revised_simplex_selects_entering_column_with_options() {
     )
     .unwrap();
 
-    let entering_column = simplex.entering_column().unwrap();
+    let entering_column = simplex.most_negative_reduced_cost().unwrap();
 
     assert_eq!(
         entering_column,
@@ -54,7 +54,7 @@ fn revised_simplex_respects_reduced_cost_tolerance() {
     )
     .unwrap();
 
-    let entering_column = simplex.entering_column().unwrap();
+    let entering_column = simplex.most_negative_reduced_cost().unwrap();
 
     assert_eq!(entering_column, None);
 }
@@ -65,7 +65,7 @@ fn revised_simplex_step_reports_optimal_basis() {
 
     let step = simplex.step().unwrap();
 
-    assert_eq!(step, SimplexStep::Optimal);
+    assert_eq!(step, Step::Optimal);
     assert_eq!(simplex.basis().indices(), &[2, 3]);
 }
 
@@ -76,7 +76,7 @@ fn revised_simplex_step_pivots_basis() {
     let step = simplex.step().unwrap();
 
     match step {
-        SimplexStep::Pivoted {
+        Step::Pivoted {
             entering,
             leaving,
             direction,
@@ -104,7 +104,7 @@ fn revised_simplex_step_reports_unbounded_direction() {
     let step = simplex.step().unwrap();
 
     match step {
-        SimplexStep::Unbounded {
+        Step::Unbounded {
             entering,
             direction,
         } => {
@@ -130,7 +130,7 @@ fn revised_simplex_solve_returns_optimal_solution() {
     let result = simplex.solve(&mut trace).unwrap();
 
     match result {
-        SimplexSolveResult::Optimal(solution) => {
+        SolveResult::Optimal(solution) => {
             assert_abs_diff_eq!(
                 solution.primal,
                 array![4.0, 3.0, 0.0, 0.0],
@@ -153,7 +153,7 @@ fn revised_simplex_solve_returns_unbounded_result() {
     let result = simplex.solve(&mut trace).unwrap();
 
     match result {
-        SimplexSolveResult::Unbounded {
+        SolveResult::Unbounded {
             entering,
             direction,
             iterations,
@@ -189,7 +189,7 @@ fn revised_simplex_solve_returns_iteration_limit_solution() {
     let result = simplex.solve(&mut trace).unwrap();
 
     match result {
-        SimplexSolveResult::IterationLimit(solution) => {
+        SolveResult::IterationLimit(solution) => {
             assert_abs_diff_eq!(
                 solution.primal,
                 array![0.0, 3.0, 4.0, 0.0],
@@ -219,16 +219,16 @@ fn revised_simplex_can_continue_after_iteration_limit() {
 
     assert!(matches!(
         simplex.solve(&mut trace).unwrap(),
-        SimplexSolveResult::IterationLimit(_)
+        SolveResult::IterationLimit(_)
     ));
     assert!(matches!(
         simplex.solve(&mut trace).unwrap(),
-        SimplexSolveResult::IterationLimit(_)
+        SolveResult::IterationLimit(_)
     ));
     let result = simplex.solve(&mut trace).unwrap();
 
     match result {
-        SimplexSolveResult::Optimal(solution) => {
+        SolveResult::Optimal(solution) => {
             assert_abs_diff_eq!(
                 solution.primal,
                 array![4.0, 3.0, 0.0, 0.0],

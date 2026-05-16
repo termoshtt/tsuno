@@ -22,10 +22,11 @@ use super::{Basis, BasisError};
 /// m \le n.
 /// $$
 ///
-/// Low-level revised simplex APIs such as [`crate::simplex::RevisedSimplex`]
-/// accept an explicit feasible [`Basis`]. The top-level
-/// [`crate::simplex::solve`] function constructs such a basis with Phase I
-/// before running the Phase II primal simplex method.
+/// Low-level revised simplex APIs such as
+/// [`crate::simplex::primal::RevisedSimplex`] accept an explicit feasible
+/// [`Basis`]. The top-level [`crate::simplex::primal::solve`] function
+/// constructs such a basis with Phase I before running the Phase II primal
+/// simplex method.
 ///
 /// Given a basis index set
 ///
@@ -58,13 +59,14 @@ use super::{Basis, BasisError};
 /// $$
 ///
 /// In a minimization problem, a nonbasis column with negative reduced cost can
-/// enter the basis. This type uses [`StandardFormLp::entering_column`] to pick
-/// the nonbasis column with the smallest reduced cost below a caller-provided
-/// tolerance.
+/// enter the basis. This type uses [`StandardFormLp::most_negative_reduced_cost`]
+/// to pick the nonbasis column with the smallest reduced cost below a
+/// caller-provided tolerance.
 ///
 /// These operations are exposed as [`StandardFormLp::basic_solution`],
 /// [`StandardFormLp::basis_costs`], [`StandardFormLp::dual_variables`],
-/// [`StandardFormLp::reduced_cost`], and [`StandardFormLp::entering_column`].
+/// [`StandardFormLp::reduced_cost`], and
+/// [`StandardFormLp::most_negative_reduced_cost`].
 #[derive(Clone, Debug)]
 pub struct StandardFormLp {
     a: Array2<f64>,
@@ -297,7 +299,7 @@ impl StandardFormLp {
             .collect()
     }
 
-    /// Select an entering column from the nonbasis reduced costs.
+    /// Select the nonbasis column with the most negative reduced cost.
     ///
     /// With the current basis $I$, a nonbasis variable $x_j$ has value zero.
     /// If $x_j$ is increased by a small step $\theta > 0$ while preserving
@@ -315,7 +317,7 @@ impl StandardFormLp {
     /// $\epsilon$. This returns the eligible column with the smallest reduced
     /// cost, or `None` when all nonbasis reduced costs are nonnegative within
     /// the tolerance.
-    pub fn entering_column(
+    pub fn most_negative_reduced_cost(
         &self,
         basis: &Basis,
         tolerance: f64,
@@ -551,11 +553,11 @@ mod tests {
     }
 
     #[test]
-    fn entering_column_selects_most_negative_reduced_cost() {
+    fn most_negative_reduced_cost_selects_most_negative_reduced_cost() {
         let lp = improving_slack_lp();
         let basis = lp.basis(vec![2, 3]).unwrap();
 
-        let entering_column = lp.entering_column(&basis, 1.0e-9).unwrap();
+        let entering_column = lp.most_negative_reduced_cost(&basis, 1.0e-9).unwrap();
 
         assert_eq!(
             entering_column,
@@ -567,17 +569,17 @@ mod tests {
     }
 
     #[test]
-    fn entering_column_returns_none_when_reduced_costs_are_nonnegative() {
+    fn most_negative_reduced_cost_returns_none_when_reduced_costs_are_nonnegative() {
         let lp = slack_lp();
         let basis = lp.basis(vec![2, 3]).unwrap();
 
-        let entering_column = lp.entering_column(&basis, 1.0e-9).unwrap();
+        let entering_column = lp.most_negative_reduced_cost(&basis, 1.0e-9).unwrap();
 
         assert_eq!(entering_column, None);
     }
 
     #[test]
-    fn entering_column_respects_tolerance() {
+    fn most_negative_reduced_cost_respects_tolerance() {
         let lp = StandardFormLp::new(
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
             array![4.0, 3.0],
@@ -586,7 +588,7 @@ mod tests {
         .unwrap();
         let basis = lp.basis(vec![2, 3]).unwrap();
 
-        let entering_column = lp.entering_column(&basis, 1.0e-7).unwrap();
+        let entering_column = lp.most_negative_reduced_cost(&basis, 1.0e-7).unwrap();
 
         assert_eq!(entering_column, None);
     }
