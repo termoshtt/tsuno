@@ -84,9 +84,9 @@ infrastructure.
 
 - [x] Represent a dual revised simplex solver state.
 - [x] Select a leaving basis position from negative basic variables.
-- [ ] Compute the pivot row via a transposed basis solve.
-- [ ] Select an entering nonbasis column with the dual ratio test.
-- [ ] Implement one dual simplex pivot step.
+- [x] Compute the pivot row via a transposed basis solve.
+- [x] Select an entering nonbasis column with the dual ratio test.
+- [x] Implement one dual simplex pivot step.
 - [ ] Implement the dual simplex solve loop and result type.
 - [ ] Share common basis-state and trace concepts with primal simplex where the
   API remains clear.

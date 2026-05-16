@@ -29,6 +29,45 @@ pub struct LeavingBasicVariable {
     pub value: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[katexit::katexit]
+/// Nonbasis column selected to enter the basis in a dual simplex step.
+///
+/// Let $p$ be the leaving basis position and let
+///
+/// $$
+/// u = B^{-T} e_p,\qquad
+/// \alpha_j = A_j^T u.
+/// $$
+///
+/// For minimization with reduced costs $r_j \ge 0$, dual feasibility is
+/// preserved by considering columns with $\alpha_j < 0$ and choosing the
+/// minimum dual ratio
+///
+/// $$
+/// \frac{r_j}{-\alpha_j}.
+/// $$
+pub struct DualEnteringColumn {
+    pub column: usize,
+    pub reduced_cost: f64,
+    pub pivot_row_value: f64,
+    pub ratio: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DualSimplexStep {
+    Optimal,
+    Infeasible {
+        leaving: LeavingBasicVariable,
+        pivot_row: Array1<f64>,
+    },
+    Pivoted {
+        leaving: LeavingBasicVariable,
+        entering: DualEnteringColumn,
+        pivot_row: Array1<f64>,
+    },
+}
+
 #[derive(Debug)]
 #[katexit::katexit]
 /// State for the dual revised simplex method.
@@ -62,9 +101,8 @@ pub struct LeavingBasicVariable {
 /// $$
 ///
 /// and then repairs negative basic primal values. This first implementation
-/// slice exposes the shared basis-level quantities and the leaving-variable
-/// selection needed to identify primal infeasibility. Pivot-row computation,
-/// entering-column selection, and the dual solve loop are added separately.
+/// slice exposes the shared basis-level quantities and one dual simplex step.
+/// The repeated solve loop and trace integration are added separately.
 pub struct DualRevisedSimplex {
     lp: StandardFormLp,
     basis: Basis,
@@ -173,6 +211,95 @@ impl DualRevisedSimplex {
             self.options.pivot_tolerance,
         ))
     }
+
+    /// Compute the dual simplex pivot row for a leaving basis position.
+    ///
+    /// If $p$ is the leaving basis position, define
+    ///
+    /// $$
+    /// u = B^{-T} e_p.
+    /// $$
+    ///
+    /// The returned vector is the full row
+    ///
+    /// $$
+    /// \alpha = A^T u,
+    /// \qquad
+    /// \alpha_j = A_j^T B^{-T} e_p.
+    /// $$
+    ///
+    /// Equivalently, $\alpha^T$ is the $p$-th row of $B^{-1} A$. For basis
+    /// columns this row has the unit-vector pattern: the leaving basis column
+    /// has value $1$ and the other basis columns have value $0$.
+    pub fn pivot_row(
+        &self,
+        leaving: &LeavingBasicVariable,
+    ) -> Result<Array1<f64>, StandardFormError> {
+        let mut unit = Array1::zeros(self.lp.a().nrows());
+        unit[leaving.position] = 1.0;
+        let row_multiplier = self.basis.solve_transposed(&unit);
+        Ok(self.lp.a().t().dot(&row_multiplier))
+    }
+
+    /// Select the entering column using the dual ratio test.
+    ///
+    /// Given a pivot row $\alpha = A^T B^{-T} e_p$, a nonbasis column can enter
+    /// the basis only when
+    ///
+    /// $$
+    /// \alpha_j < -\epsilon.
+    /// $$
+    ///
+    /// Among those candidates, this chooses
+    ///
+    /// $$
+    /// q \in \operatorname*{argmin}_{j:\ \alpha_j < -\epsilon}
+    /// \frac{r_j}{-\alpha_j},
+    /// $$
+    ///
+    /// where $r_j = c_j - A_j^T y$ is the current reduced cost. If there is no
+    /// candidate, the current dual feasible dictionary proves primal
+    /// infeasibility for this leaving row.
+    pub fn entering_column_for_dual_step(
+        &self,
+        pivot_row: &Array1<f64>,
+    ) -> Result<Option<DualEnteringColumn>, StandardFormError> {
+        Ok(entering_column_for_dual_step(
+            self.reduced_costs()?,
+            pivot_row,
+            self.options.pivot_tolerance,
+        ))
+    }
+
+    /// Apply one dual revised simplex step.
+    ///
+    /// If the basic solution already satisfies $x_I \ge -\epsilon$, the current
+    /// dual feasible basis is also primal feasible and is therefore optimal for
+    /// the standard-form minimization problem. Otherwise this method chooses a
+    /// leaving basic variable, computes the pivot row, applies the dual ratio
+    /// test, and replaces the leaving basis column with the selected entering
+    /// column.
+    pub fn step(&mut self) -> Result<DualSimplexStep, StandardFormError> {
+        let Some(leaving) = self.leaving_basic_variable()? else {
+            return Ok(DualSimplexStep::Optimal);
+        };
+
+        let pivot_row = self.pivot_row(&leaving)?;
+        let Some(entering) = self.entering_column_for_dual_step(&pivot_row)? else {
+            return Ok(DualSimplexStep::Infeasible { leaving, pivot_row });
+        };
+
+        let entering_column = self.lp.column(entering.column)?.to_owned();
+        self.basis
+            .replace_column(leaving.position, entering.column, &entering_column)
+            .map_err(StandardFormError::Basis)?;
+
+        Ok(DualSimplexStep::Pivoted {
+            leaving,
+            entering,
+            pivot_row,
+        })
+    }
 }
 
 fn leaving_basic_variable(
@@ -191,6 +318,26 @@ fn leaving_basic_variable(
             value: *value,
         })
         .min_by(|left, right| left.value.total_cmp(&right.value))
+}
+
+fn entering_column_for_dual_step(
+    reduced_costs: Vec<PricedColumn>,
+    pivot_row: &Array1<f64>,
+    tolerance: f64,
+) -> Option<DualEnteringColumn> {
+    let tolerance = tolerance.max(0.0);
+    reduced_costs
+        .into_iter()
+        .filter_map(|priced_column| {
+            let pivot_row_value = pivot_row[priced_column.column];
+            (pivot_row_value < -tolerance).then(|| DualEnteringColumn {
+                column: priced_column.column,
+                reduced_cost: priced_column.reduced_cost,
+                pivot_row_value,
+                ratio: priced_column.reduced_cost / -pivot_row_value,
+            })
+        })
+        .min_by(|left, right| left.ratio.total_cmp(&right.ratio))
 }
 
 #[cfg(test)]
@@ -300,6 +447,113 @@ mod tests {
         assert_eq!(leaving, None);
     }
 
+    #[test]
+    fn dual_revised_simplex_computes_pivot_row() {
+        let simplex =
+            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let leaving = simplex.leaving_basic_variable().unwrap().unwrap();
+
+        let pivot_row = simplex.pivot_row(&leaving).unwrap();
+
+        assert_abs_diff_eq!(pivot_row, array![-1.0, 1.0, 0.0], epsilon = 1.0e-9);
+    }
+
+    #[test]
+    fn dual_revised_simplex_selects_entering_column_by_dual_ratio() {
+        let simplex =
+            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let leaving = simplex.leaving_basic_variable().unwrap().unwrap();
+        let pivot_row = simplex.pivot_row(&leaving).unwrap();
+
+        let entering = simplex
+            .entering_column_for_dual_step(&pivot_row)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            entering,
+            DualEnteringColumn {
+                column: 0,
+                reduced_cost: 1.0,
+                pivot_row_value: -1.0,
+                ratio: 1.0,
+            }
+        );
+    }
+
+    #[test]
+    fn dual_revised_simplex_step_pivots_basis() {
+        let mut simplex =
+            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+
+        let step = simplex.step().unwrap();
+
+        match step {
+            DualSimplexStep::Pivoted {
+                leaving,
+                entering,
+                pivot_row,
+            } => {
+                assert_eq!(
+                    leaving,
+                    LeavingBasicVariable {
+                        position: 0,
+                        column: 1,
+                        value: -1.0,
+                    }
+                );
+                assert_eq!(entering.column, 0);
+                assert_abs_diff_eq!(pivot_row, array![-1.0, 1.0, 0.0], epsilon = 1.0e-9);
+            }
+            _ => panic!("expected a dual pivot"),
+        }
+        assert_eq!(simplex.basis().indices(), &[0, 2]);
+        assert_abs_diff_eq!(
+            simplex.basic_solution().unwrap(),
+            array![1.0, 1.0],
+            epsilon = 1.0e-9
+        );
+        assert!(simplex.is_dual_feasible().unwrap());
+    }
+
+    #[test]
+    fn dual_revised_simplex_step_reports_optimal_when_primal_feasible() {
+        let mut simplex =
+            DualRevisedSimplex::new(primal_and_dual_feasible_slack_basis_lp(), vec![1, 2]).unwrap();
+
+        let step = simplex.step().unwrap();
+
+        assert_eq!(step, DualSimplexStep::Optimal);
+        assert_eq!(simplex.basis().indices(), &[1, 2]);
+    }
+
+    #[test]
+    fn dual_revised_simplex_step_reports_infeasible_without_entering_column() {
+        let mut simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_without_entering_lp(),
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let step = simplex.step().unwrap();
+
+        match step {
+            DualSimplexStep::Infeasible { leaving, pivot_row } => {
+                assert_eq!(
+                    leaving,
+                    LeavingBasicVariable {
+                        position: 0,
+                        column: 1,
+                        value: -1.0,
+                    }
+                );
+                assert_abs_diff_eq!(pivot_row, array![1.0, 1.0, 0.0], epsilon = 1.0e-9);
+            }
+            _ => panic!("expected infeasible dual step"),
+        }
+        assert_eq!(simplex.basis().indices(), &[1, 2]);
+    }
+
     fn dual_feasible_primal_infeasible_lp() -> StandardFormLp {
         StandardFormLp::new(
             array![[-1.0, 1.0, 0.0], [1.0, 0.0, 1.0]],
@@ -314,6 +568,15 @@ mod tests {
             array![[-1.0, 1.0, 0.0], [1.0, 0.0, 1.0]],
             array![-1.0, 2.0],
             array![-1.0, 0.0, 0.0],
+        )
+        .unwrap()
+    }
+
+    fn dual_feasible_primal_infeasible_without_entering_lp() -> StandardFormLp {
+        StandardFormLp::new(
+            array![[1.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            array![-1.0, 2.0],
+            array![1.0, 0.0, 0.0],
         )
         .unwrap()
     }
