@@ -19,11 +19,9 @@ use crate::simplex::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 ///
 /// Dual simplex repairs primal infeasibility by selecting a basis position
 /// $p$ whose basic value is negative. The `position` field is this position
-/// inside the ordered basis, while `column` is the corresponding original
-/// column index $j_p$ in $A$.
+/// inside the ordered basis.
 pub struct LeavingBasicVariable {
     pub position: usize,
-    pub column: usize,
     pub value: f64,
 }
 
@@ -204,7 +202,6 @@ impl DualRevisedSimplex {
     ) -> Result<Option<LeavingBasicVariable>, StandardFormError> {
         let basic_solution = self.basic_solution()?;
         Ok(leaving_basic_variable(
-            self.basis.indices(),
             &basic_solution,
             self.options.pivot_tolerance,
         ))
@@ -301,7 +298,6 @@ impl DualRevisedSimplex {
 }
 
 fn leaving_basic_variable(
-    basis_indices: &[usize],
     basic_solution: &Array1<f64>,
     tolerance: f64,
 ) -> Option<LeavingBasicVariable> {
@@ -312,7 +308,6 @@ fn leaving_basic_variable(
         .filter(|(_, value)| **value < -tolerance)
         .map(|(position, value)| LeavingBasicVariable {
             position,
-            column: basis_indices[position],
             value: *value,
         })
         .min_by(|left, right| left.value.total_cmp(&right.value))
@@ -412,7 +407,6 @@ mod tests {
             leaving,
             Some(LeavingBasicVariable {
                 position: 1,
-                column: 2,
                 value: -3.0,
             })
         );
@@ -496,7 +490,6 @@ mod tests {
                     leaving,
                     LeavingBasicVariable {
                         position: 0,
-                        column: 1,
                         value: -1.0,
                     }
                 );
@@ -541,7 +534,6 @@ mod tests {
                     leaving,
                     LeavingBasicVariable {
                         position: 0,
-                        column: 1,
                         value: -1.0,
                     }
                 );
