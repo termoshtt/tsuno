@@ -1,5 +1,5 @@
 ---
-source: src/simplex/revised_simplex/phase_one.rs
+source: src/simplex/primal/phase_one.rs
 expression: trace
 ---
 phase: phase one

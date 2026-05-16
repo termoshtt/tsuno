@@ -1,7 +1,9 @@
 use ndarray::{Array1, Array2};
 
-use super::{RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTracePhase};
-use crate::simplex::primal::{RevisedSimplex, SolveResult};
+use super::{RevisedSimplex, SolveResult};
+use crate::simplex::revised_simplex::{
+    RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTracePhase,
+};
 use crate::simplex::{FarkasCertificate, StandardFormError, StandardFormLp};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,7 +35,7 @@ pub enum PhaseOneError {
 
 #[derive(Clone, Debug, PartialEq)]
 /// Result of Phase I feasible-basis construction.
-pub(super) enum PhaseOneResult {
+pub(crate) enum PhaseOneResult {
     Feasible { basis_indices: Vec<usize> },
     Infeasible(PhaseOneInfeasible),
     IterationLimit(PhaseOneIterationLimit),
@@ -108,7 +110,7 @@ impl PhaseOneAuxiliaryProblem {
     }
 
     /// Solve the auxiliary Phase I problem and extract an original feasible basis.
-    pub(super) fn solve(
+    pub(crate) fn solve(
         self,
         options: RevisedSimplexOptions,
         trace: &mut impl SimplexTrace,

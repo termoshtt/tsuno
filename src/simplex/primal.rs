@@ -5,6 +5,13 @@ use super::revised_simplex::{
 };
 use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
+mod phase_one;
+
+pub(crate) use phase_one::PhaseOneResult;
+pub use phase_one::{
+    PhaseOneAuxiliaryProblem, PhaseOneError, PhaseOneInfeasible, PhaseOneIterationLimit,
+};
+
 #[derive(Clone, Debug, PartialEq)]
 /// Original column that leaves the basis in a pivoted primal simplex step.
 ///

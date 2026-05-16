@@ -1,12 +1,13 @@
 use ndarray::Array1;
 
 use super::{PricedColumn, StandardFormError, StandardFormLp};
-use crate::simplex::primal::{RevisedSimplex, SolveResult};
+use crate::simplex::primal::{
+    PhaseOneAuxiliaryProblem, PhaseOneError, PhaseOneInfeasible, PhaseOneIterationLimit,
+    PhaseOneResult, RevisedSimplex, SolveResult,
+};
 
-mod phase_one;
 mod trace;
 
-pub use phase_one::*;
 pub use trace::*;
 
 #[derive(Clone, Debug)]
@@ -132,16 +133,12 @@ pub fn solve(
     trace: &mut impl SimplexTrace,
 ) -> Result<SimplexResult, SimplexError> {
     match PhaseOneAuxiliaryProblem::new(&lp).solve(options.clone(), trace)? {
-        phase_one::PhaseOneResult::Feasible { basis_indices } => {
+        PhaseOneResult::Feasible { basis_indices } => {
             let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
             trace.phase_started(SimplexTracePhase::PhaseTwo);
             simplex.solve(trace).map(SimplexResult::from)
         }
-        phase_one::PhaseOneResult::Infeasible(infeasible) => {
-            Ok(SimplexResult::Infeasible(infeasible))
-        }
-        phase_one::PhaseOneResult::IterationLimit(limit) => {
-            Ok(SimplexResult::PhaseOneIterationLimit(limit))
-        }
+        PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(infeasible)),
+        PhaseOneResult::IterationLimit(limit) => Ok(SimplexResult::PhaseOneIterationLimit(limit)),
     }
 }
