@@ -1,7 +1,8 @@
 use ndarray::Array1;
 
 use super::revised_simplex::{
-    RevisedSimplexOptions, SimplexError, SimplexSolution, SimplexTrace, SimplexTraceEvent,
+    RevisedSimplexOptions, SimplexError, SimplexResult, SimplexSolution, SimplexTrace,
+    SimplexTraceEvent, SimplexTracePhase,
 };
 use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
@@ -54,6 +55,49 @@ pub enum SolveResult {
         direction: Array1<f64>,
         iterations: usize,
     },
+}
+
+#[katexit::katexit]
+/// Solve a standard-form LP with a Phase I feasible-basis construction.
+///
+/// This is the top-level primal simplex entry point for
+///
+/// $$
+/// \min c^T x
+/// \quad \text{s.t.} \quad
+/// A x = b,\quad x \ge 0.
+/// $$
+///
+/// It first solves the Phase I auxiliary problem
+///
+/// $$
+/// \min \mathbf{1}^T w
+/// \quad \text{s.t.} \quad
+/// D A x + w = D b,\quad x,w \ge 0,
+/// $$
+///
+/// where $D$ is a diagonal row-sign matrix chosen so that $D b \ge 0$.
+/// If the Phase I optimum is positive, the original LP is infeasible. If it is
+/// zero, the resulting feasible original basis is used to start Phase II.
+///
+/// This module exposes one full-featured primal solve entry point. Pass
+/// [`RevisedSimplexOptions::default`] for default tolerances and iteration
+/// limits, and pass [`crate::simplex::NoTrace`] when no trace collection is
+/// needed.
+pub fn solve(
+    lp: StandardFormLp,
+    options: RevisedSimplexOptions,
+    trace: &mut impl SimplexTrace,
+) -> Result<SimplexResult, SimplexError> {
+    match PhaseOneAuxiliaryProblem::new(&lp).solve(options.clone(), trace)? {
+        PhaseOneResult::Feasible { basis_indices } => {
+            let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
+            trace.phase_started(SimplexTracePhase::PhaseTwo);
+            simplex.solve(trace).map(SimplexResult::from)
+        }
+        PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(infeasible)),
+        PhaseOneResult::IterationLimit(limit) => Ok(SimplexResult::PhaseOneIterationLimit(limit)),
+    }
 }
 
 #[katexit::katexit]

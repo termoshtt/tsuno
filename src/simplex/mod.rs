@@ -6,9 +6,8 @@ mod standard_form;
 
 pub use basis::*;
 pub use dual::DualRevisedSimplex;
-pub use primal::RevisedSimplex;
 pub use revised_simplex::{
     FullTrace, FullTraceOutcome, FullTraceStep, NoTrace, RevisedSimplexOptions, SimplexError,
-    SimplexResult, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTracePhase, solve,
+    SimplexResult, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTracePhase,
 };
 pub use standard_form::*;

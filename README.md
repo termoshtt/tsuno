@@ -31,7 +31,7 @@ and provides the following pieces.
   - reduced costs `r_j = c_j - A_j^T y`
 - [x] Primal revised simplex step and solve loop.
 - [x] Phase I auxiliary problem with artificial variables.
-- [x] Top-level `simplex::solve` that runs Phase I and then Phase II.
+- [x] `simplex::primal::solve` that runs Phase I and then Phase II.
 - [x] Structured simplex traces for solver paths and snapshot tests.
 
 The LU update path currently uses eta updates. Forrest-Tomlin-style updates,

@@ -22,10 +22,11 @@ use super::{Basis, BasisError};
 /// m \le n.
 /// $$
 ///
-/// Low-level revised simplex APIs such as [`crate::simplex::RevisedSimplex`]
-/// accept an explicit feasible [`Basis`]. The top-level
-/// [`crate::simplex::solve`] function constructs such a basis with Phase I
-/// before running the Phase II primal simplex method.
+/// Low-level revised simplex APIs such as
+/// [`crate::simplex::primal::RevisedSimplex`] accept an explicit feasible
+/// [`Basis`]. The top-level [`crate::simplex::primal::solve`] function
+/// constructs such a basis with Phase I before running the Phase II primal
+/// simplex method.
 ///
 /// Given a basis index set
 ///

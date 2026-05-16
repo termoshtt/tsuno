@@ -279,7 +279,8 @@ mod tests {
     use ndarray::array;
 
     use super::*;
-    use crate::simplex::{FullTrace, SimplexResult, solve};
+    use crate::simplex::primal::solve;
+    use crate::simplex::{FullTrace, SimplexResult};
 
     #[test]
     fn phase_one_returns_original_feasible_basis() {
