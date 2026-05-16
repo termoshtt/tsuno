@@ -43,7 +43,7 @@ pub struct LeavingBasicVariable {
 /// $$
 /// \frac{r_j}{-\alpha_j}.
 /// $$
-pub struct DualEnteringColumn {
+pub struct EnteringColumn {
     pub column: usize,
     pub reduced_cost: f64,
     pub pivot_row_value: f64,
@@ -51,7 +51,7 @@ pub struct DualEnteringColumn {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum DualSimplexStep {
+pub enum Step {
     Optimal,
     Infeasible {
         leaving: LeavingBasicVariable,
@@ -59,7 +59,7 @@ pub enum DualSimplexStep {
     },
     Pivoted {
         leaving: LeavingBasicVariable,
-        entering: DualEnteringColumn,
+        entering: EnteringColumn,
         pivot_row: Array1<f64>,
     },
 }
@@ -258,7 +258,7 @@ impl DualRevisedSimplex {
     pub fn dual_minimum_ratio_test(
         &self,
         pivot_row: &Array1<f64>,
-    ) -> Result<Option<DualEnteringColumn>, StandardFormError> {
+    ) -> Result<Option<EnteringColumn>, StandardFormError> {
         Ok(dual_minimum_ratio_test(
             self.reduced_costs()?,
             pivot_row,
@@ -274,14 +274,14 @@ impl DualRevisedSimplex {
     /// leaving basic variable, computes the pivot row, applies the dual ratio
     /// test, and replaces the leaving basis column with the selected entering
     /// column.
-    pub fn step(&mut self) -> Result<DualSimplexStep, StandardFormError> {
+    pub fn step(&mut self) -> Result<Step, StandardFormError> {
         let Some(leaving) = self.most_infeasible_basic_variable()? else {
-            return Ok(DualSimplexStep::Optimal);
+            return Ok(Step::Optimal);
         };
 
         let pivot_row = self.pivot_row(&leaving)?;
         let Some(entering) = self.dual_minimum_ratio_test(&pivot_row)? else {
-            return Ok(DualSimplexStep::Infeasible { leaving, pivot_row });
+            return Ok(Step::Infeasible { leaving, pivot_row });
         };
 
         let entering_column = self.lp.column(entering.column)?.to_owned();
@@ -289,7 +289,7 @@ impl DualRevisedSimplex {
             .replace_column(leaving.position, entering.column, &entering_column)
             .map_err(StandardFormError::Basis)?;
 
-        Ok(DualSimplexStep::Pivoted {
+        Ok(Step::Pivoted {
             leaving,
             entering,
             pivot_row,
@@ -317,13 +317,13 @@ fn dual_minimum_ratio_test(
     reduced_costs: Vec<PricedColumn>,
     pivot_row: &Array1<f64>,
     tolerance: f64,
-) -> Option<DualEnteringColumn> {
+) -> Option<EnteringColumn> {
     let tolerance = tolerance.max(0.0);
     reduced_costs
         .into_iter()
         .filter_map(|priced_column| {
             let pivot_row_value = pivot_row[priced_column.column];
-            (pivot_row_value < -tolerance).then(|| DualEnteringColumn {
+            (pivot_row_value < -tolerance).then(|| EnteringColumn {
                 column: priced_column.column,
                 reduced_cost: priced_column.reduced_cost,
                 pivot_row_value,
@@ -464,7 +464,7 @@ mod tests {
 
         assert_eq!(
             entering,
-            DualEnteringColumn {
+            EnteringColumn {
                 column: 0,
                 reduced_cost: 1.0,
                 pivot_row_value: -1.0,
@@ -481,7 +481,7 @@ mod tests {
         let step = simplex.step().unwrap();
 
         match step {
-            DualSimplexStep::Pivoted {
+            Step::Pivoted {
                 leaving,
                 entering,
                 pivot_row,
@@ -514,7 +514,7 @@ mod tests {
 
         let step = simplex.step().unwrap();
 
-        assert_eq!(step, DualSimplexStep::Optimal);
+        assert_eq!(step, Step::Optimal);
         assert_eq!(simplex.basis().indices(), &[1, 2]);
     }
 
@@ -529,7 +529,7 @@ mod tests {
         let step = simplex.step().unwrap();
 
         match step {
-            DualSimplexStep::Infeasible { leaving, pivot_row } => {
+            Step::Infeasible { leaving, pivot_row } => {
                 assert_eq!(
                     leaving,
                     LeavingBasicVariable {

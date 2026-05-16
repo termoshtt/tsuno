@@ -2,8 +2,8 @@ use std::fmt;
 
 use ndarray::Array1;
 
-use super::{LeavingColumn, SimplexStep};
 use crate::simplex::PricedColumn;
+use crate::simplex::primal::{LeavingColumn, Step};
 
 pub trait SimplexTrace {
     fn phase_started(&mut self, _phase: SimplexTracePhase) {}
@@ -29,7 +29,7 @@ impl SimplexTrace for NoTrace {
 #[derive(Clone, Debug)]
 pub struct SimplexTraceEvent<'a> {
     pub iteration: usize,
-    pub step: &'a SimplexStep,
+    pub step: &'a Step,
     pub basis_after: &'a [usize],
 }
 
@@ -98,18 +98,18 @@ impl FullTrace {
     }
 }
 
-impl From<&SimplexStep> for FullTraceOutcome {
-    fn from(step: &SimplexStep) -> Self {
+impl From<&Step> for FullTraceOutcome {
+    fn from(step: &Step) -> Self {
         match step {
-            SimplexStep::Optimal => FullTraceOutcome::Optimal,
-            SimplexStep::Unbounded {
+            Step::Optimal => FullTraceOutcome::Optimal,
+            Step::Unbounded {
                 entering,
                 direction,
             } => FullTraceOutcome::Unbounded {
                 entering: entering.clone(),
                 direction: direction.clone(),
             },
-            SimplexStep::Pivoted {
+            Step::Pivoted {
                 entering,
                 leaving,
                 direction,

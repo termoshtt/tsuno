@@ -1,9 +1,7 @@
 use ndarray::{Array1, Array2};
 
-use super::{
-    RevisedSimplex, RevisedSimplexOptions, SimplexSolution, SimplexSolveResult, SimplexTrace,
-    SimplexTracePhase,
-};
+use super::{RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTracePhase};
+use crate::simplex::primal::{RevisedSimplex, SolveResult};
 use crate::simplex::{FarkasCertificate, StandardFormError, StandardFormLp};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,7 +127,7 @@ impl PhaseOneAuxiliaryProblem {
             .solve(trace)
             .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?
         {
-            SimplexSolveResult::Optimal(solution) => {
+            SolveResult::Optimal(solution) => {
                 if solution.objective_value > options.pivot_tolerance {
                     let certificate = farkas_certificate(&simplex, &row_signs)
                         .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
@@ -151,12 +149,12 @@ impl PhaseOneAuxiliaryProblem {
                 let basis_indices = simplex.basis.indices().to_vec();
                 Ok(PhaseOneResult::Feasible { basis_indices })
             }
-            SimplexSolveResult::IterationLimit(solution) => {
+            SolveResult::IterationLimit(solution) => {
                 Ok(PhaseOneResult::IterationLimit(PhaseOneIterationLimit {
                     auxiliary_solution: solution,
                 }))
             }
-            SimplexSolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
+            SolveResult::Unbounded { .. } => Err(PhaseOneError::NoOriginalFeasibleBasis),
         }
     }
 }
