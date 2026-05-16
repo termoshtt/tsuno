@@ -1,6 +1,8 @@
 use ndarray::Array1;
 
-use super::RevisedSimplexOptions;
+use super::{
+    RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTraceStep,
+};
 use crate::simplex::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +66,18 @@ pub enum Step {
     },
 }
 
+#[derive(Clone, Debug, PartialEq)]
+/// Outcome of repeatedly applying dual revised simplex steps.
+pub enum SolveResult {
+    Optimal(SimplexSolution),
+    IterationLimit(SimplexSolution),
+    Infeasible {
+        leaving: LeavingBasicVariable,
+        pivot_row: Array1<f64>,
+        iterations: usize,
+    },
+}
+
 #[derive(Debug)]
 #[katexit::katexit]
 /// State for the dual revised simplex method.
@@ -96,9 +110,33 @@ pub enum Step {
 /// r_j \ge -\epsilon \quad (j \notin I),
 /// $$
 ///
-/// and then repairs negative basic primal values. This first implementation
-/// slice exposes the shared basis-level quantities and one dual simplex step.
-/// The repeated solve loop and trace integration are added separately.
+/// and then repairs negative basic primal values.
+///
+/// One dual revised simplex step chooses a leaving basis position
+///
+/// $$
+/// p \in \operatorname*{argmin}_i (x_I)_i
+/// \quad\text{subject to}\quad
+/// (x_I)_i < -\epsilon,
+/// $$
+///
+/// computes the pivot row
+///
+/// $$
+/// \alpha_j = A_j^T B^{-T} e_p,
+/// $$
+///
+/// and chooses the entering column by the dual minimum ratio test
+///
+/// $$
+/// q \in \operatorname*{argmin}_{j:\ \alpha_j < -\epsilon}
+/// \frac{r_j}{-\alpha_j}.
+/// $$
+///
+/// If no basic value is negative, the dual-feasible basis is also primal
+/// feasible and therefore optimal. If a leaving row has no eligible entering
+/// column, the dual feasible dictionary proves primal infeasibility for the
+/// current standard-form LP.
 pub struct DualRevisedSimplex {
     lp: StandardFormLp,
     basis: Basis,
@@ -295,6 +333,83 @@ impl DualRevisedSimplex {
             pivot_row,
         })
     }
+
+    /// Repeatedly apply dual revised simplex steps until termination.
+    ///
+    /// Each iteration applies [`DualRevisedSimplex::step`]. The method assumes
+    /// the initial basis is dual feasible:
+    ///
+    /// $$
+    /// r_j \ge -\epsilon \quad (j \notin I).
+    /// $$
+    ///
+    /// If all basic values also satisfy
+    ///
+    /// $$
+    /// x_I = B^{-1} b \ge -\epsilon,
+    /// $$
+    ///
+    /// the current basis is optimal. If a negative basic value is selected but
+    /// its pivot row has no entering candidate with $\alpha_j < -\epsilon$, the
+    /// problem is reported as infeasible. If neither terminal condition occurs
+    /// before [`RevisedSimplexOptions::max_iterations`] step attempts, this
+    /// returns [`SolveResult::IterationLimit`] with the current basic solution.
+    pub fn solve(
+        &mut self,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<SolveResult, StandardFormError> {
+        for iteration in 0..self.options.max_iterations {
+            trace.step_started(iteration, self.basis.indices());
+            let step = self.step()?;
+            trace.step_completed(SimplexTraceEvent {
+                iteration,
+                step: SimplexTraceStep::Dual(&step),
+                basis_after: self.basis.indices(),
+            });
+
+            match step {
+                Step::Optimal => {
+                    return Ok(SolveResult::Optimal(self.current_solution(iteration)?));
+                }
+                Step::Infeasible { leaving, pivot_row } => {
+                    return Ok(SolveResult::Infeasible {
+                        leaving,
+                        pivot_row,
+                        iterations: iteration,
+                    });
+                }
+                Step::Pivoted { .. } => {}
+            }
+        }
+
+        Ok(SolveResult::IterationLimit(
+            self.current_solution(self.options.max_iterations)?,
+        ))
+    }
+
+    fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
+        let basic_solution = self.basic_solution()?;
+        let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
+        let objective_value = self.lp.c().dot(&primal);
+        Ok(SimplexSolution {
+            primal,
+            objective_value,
+            basis_indices: self.basis.indices().to_vec(),
+            iterations,
+        })
+    }
+}
+
+fn full_primal_solution(
+    dimension: usize,
+    basis_indices: &[usize],
+    basic_solution: &Array1<f64>,
+) -> Array1<f64> {
+    let mut primal = Array1::zeros(dimension);
+    for (&column, &value) in basis_indices.iter().zip(basic_solution.iter()) {
+        primal[column] = value;
+    }
+    primal
 }
 
 fn most_infeasible_basic_variable(
@@ -339,6 +454,7 @@ mod tests {
     use ndarray::array;
 
     use super::*;
+    use crate::simplex::FullTrace;
 
     #[test]
     fn dual_revised_simplex_builds_basis_and_exposes_state() {
@@ -542,6 +658,85 @@ mod tests {
             _ => panic!("expected infeasible dual step"),
         }
         assert_eq!(simplex.basis().indices(), &[1, 2]);
+    }
+
+    #[test]
+    fn dual_revised_simplex_solve_returns_optimal_solution() {
+        let mut simplex =
+            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let mut trace = FullTrace::default();
+
+        let result = simplex.solve(&mut trace).unwrap();
+
+        match result {
+            SolveResult::Optimal(solution) => {
+                assert_abs_diff_eq!(solution.primal, array![1.0, 0.0, 1.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.objective_value, 1.0, epsilon = 1.0e-9);
+                assert_eq!(solution.basis_indices, vec![0, 2]);
+                assert_eq!(solution.iterations, 1);
+            }
+            _ => panic!("expected an optimal dual simplex solution"),
+        }
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn dual_revised_simplex_solve_returns_iteration_limit_solution() {
+        let mut simplex = DualRevisedSimplex::with_options(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions {
+                max_iterations: 1,
+                ..RevisedSimplexOptions::default()
+            },
+        )
+        .unwrap();
+        let mut trace = FullTrace::default();
+
+        let result = simplex.solve(&mut trace).unwrap();
+
+        match result {
+            SolveResult::IterationLimit(solution) => {
+                assert_abs_diff_eq!(solution.primal, array![1.0, 0.0, 1.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.objective_value, 1.0, epsilon = 1.0e-9);
+                assert_eq!(solution.basis_indices, vec![0, 2]);
+                assert_eq!(solution.iterations, 1);
+            }
+            _ => panic!("expected a dual simplex iteration-limit solution"),
+        }
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn dual_revised_simplex_solve_returns_infeasible_result() {
+        let mut simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_without_entering_lp(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let mut trace = FullTrace::default();
+
+        let result = simplex.solve(&mut trace).unwrap();
+
+        match result {
+            SolveResult::Infeasible {
+                leaving,
+                pivot_row,
+                iterations,
+            } => {
+                assert_eq!(
+                    leaving,
+                    LeavingBasicVariable {
+                        position: 0,
+                        value: -1.0,
+                    }
+                );
+                assert_abs_diff_eq!(pivot_row, array![1.0, 1.0, 0.0], epsilon = 1.0e-9);
+                assert_eq!(iterations, 0);
+            }
+            _ => panic!("expected a dual simplex infeasible result"),
+        }
+        insta::assert_snapshot!(trace);
     }
 
     fn dual_feasible_primal_infeasible_lp() -> StandardFormLp {

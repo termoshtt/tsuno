@@ -1,0 +1,10 @@
+---
+source: src/simplex/dual.rs
+expression: trace
+---
+iteration 0
+basis before: [1, 2]
+outcome: infeasible
+leaving basis position: 0 (value: -1)
+pivot row: [1, 1, 0]
+basis after: [1, 2]

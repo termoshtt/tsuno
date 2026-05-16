@@ -1,0 +1,16 @@
+---
+source: src/simplex/dual.rs
+expression: trace
+---
+iteration 0
+basis before: [1, 2]
+outcome: pivoted
+leaving basis position: 0 (value: -1)
+entering column: 0 (reduced_cost: 1, pivot_row_value: -1, ratio: 1)
+pivot row: [-1, 1, 0]
+basis after: [0, 2]
+
+iteration 1
+basis before: [0, 2]
+outcome: optimal
+basis after: [0, 2]

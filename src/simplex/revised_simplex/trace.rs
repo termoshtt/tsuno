@@ -3,6 +3,10 @@ use std::fmt;
 use ndarray::Array1;
 
 use crate::simplex::PricedColumn;
+use crate::simplex::dual::{
+    EnteringColumn as DualEnteringColumn, LeavingBasicVariable as DualLeavingBasicVariable,
+    Step as DualStep,
+};
 use crate::simplex::primal::{LeavingColumn, Step};
 
 pub trait SimplexTrace {
@@ -29,8 +33,14 @@ impl SimplexTrace for NoTrace {
 #[derive(Clone, Debug)]
 pub struct SimplexTraceEvent<'a> {
     pub iteration: usize,
-    pub step: &'a Step,
+    pub step: SimplexTraceStep<'a>,
     pub basis_after: &'a [usize],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SimplexTraceStep<'a> {
+    Primal(&'a Step),
+    Dual(&'a DualStep),
 }
 
 /// Trace collector that stores every revised simplex step.
@@ -69,6 +79,15 @@ pub enum FullTraceOutcome {
         leaving: LeavingColumn,
         direction: Array1<f64>,
     },
+    Infeasible {
+        leaving: DualLeavingBasicVariable,
+        pivot_row: Array1<f64>,
+    },
+    DualPivoted {
+        leaving: DualLeavingBasicVariable,
+        entering: DualEnteringColumn,
+        pivot_row: Array1<f64>,
+    },
 }
 
 impl SimplexTrace for FullTrace {
@@ -98,25 +117,43 @@ impl FullTrace {
     }
 }
 
-impl From<&Step> for FullTraceOutcome {
-    fn from(step: &Step) -> Self {
+impl From<SimplexTraceStep<'_>> for FullTraceOutcome {
+    fn from(step: SimplexTraceStep<'_>) -> Self {
         match step {
-            Step::Optimal => FullTraceOutcome::Optimal,
-            Step::Unbounded {
-                entering,
-                direction,
-            } => FullTraceOutcome::Unbounded {
-                entering: entering.clone(),
-                direction: direction.clone(),
+            SimplexTraceStep::Primal(step) => match step {
+                Step::Optimal => FullTraceOutcome::Optimal,
+                Step::Unbounded {
+                    entering,
+                    direction,
+                } => FullTraceOutcome::Unbounded {
+                    entering: entering.clone(),
+                    direction: direction.clone(),
+                },
+                Step::Pivoted {
+                    entering,
+                    leaving,
+                    direction,
+                } => FullTraceOutcome::Pivoted {
+                    entering: entering.clone(),
+                    leaving: leaving.clone(),
+                    direction: direction.clone(),
+                },
             },
-            Step::Pivoted {
-                entering,
-                leaving,
-                direction,
-            } => FullTraceOutcome::Pivoted {
-                entering: entering.clone(),
-                leaving: leaving.clone(),
-                direction: direction.clone(),
+            SimplexTraceStep::Dual(step) => match step {
+                DualStep::Optimal => FullTraceOutcome::Optimal,
+                DualStep::Infeasible { leaving, pivot_row } => FullTraceOutcome::Infeasible {
+                    leaving: leaving.clone(),
+                    pivot_row: pivot_row.clone(),
+                },
+                DualStep::Pivoted {
+                    leaving,
+                    entering,
+                    pivot_row,
+                } => FullTraceOutcome::DualPivoted {
+                    leaving: leaving.clone(),
+                    entering: entering.clone(),
+                    pivot_row: pivot_row.clone(),
+                },
             },
         }
     }
@@ -192,6 +229,38 @@ impl fmt::Display for FullTraceOutcome {
                     format_number(leaving.step_length)
                 )?;
                 writeln!(f, "direction: {}", format_array(direction))
+            }
+            FullTraceOutcome::Infeasible { leaving, pivot_row } => {
+                writeln!(f, "outcome: infeasible")?;
+                writeln!(
+                    f,
+                    "leaving basis position: {} (value: {})",
+                    leaving.position,
+                    format_number(leaving.value)
+                )?;
+                writeln!(f, "pivot row: {}", format_array(pivot_row))
+            }
+            FullTraceOutcome::DualPivoted {
+                leaving,
+                entering,
+                pivot_row,
+            } => {
+                writeln!(f, "outcome: pivoted")?;
+                writeln!(
+                    f,
+                    "leaving basis position: {} (value: {})",
+                    leaving.position,
+                    format_number(leaving.value)
+                )?;
+                writeln!(
+                    f,
+                    "entering column: {} (reduced_cost: {}, pivot_row_value: {}, ratio: {})",
+                    entering.column,
+                    format_number(entering.reduced_cost),
+                    format_number(entering.pivot_row_value),
+                    format_number(entering.ratio)
+                )?;
+                writeln!(f, "pivot row: {}", format_array(pivot_row))
             }
         }
     }

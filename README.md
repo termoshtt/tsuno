@@ -87,8 +87,8 @@ infrastructure.
 - [x] Select an entering nonbasis column with the dual minimum ratio test.
 - [x] Implement one dual simplex pivot step.
 - [x] Place dual-specific step types under `simplex::dual`.
-- [ ] Implement the dual simplex solve loop and result type.
-- [ ] Share common basis-state and trace concepts with primal simplex where the
+- [x] Implement the dual simplex solve loop and result type.
+- [x] Share common basis-state and trace concepts with primal simplex where the
   API remains clear.
 
 ### Farkas Certificates
