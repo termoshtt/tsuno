@@ -83,7 +83,7 @@ reuse the existing basis, basis solve, transposed solve, reduced-cost, and trace
 infrastructure.
 
 - [x] Represent a dual revised simplex solver state.
-- [ ] Select a leaving basis position from negative basic variables.
+- [x] Select a leaving basis position from negative basic variables.
 - [ ] Compute the pivot row via a transposed basis solve.
 - [ ] Select an entering nonbasis column with the dual ratio test.
 - [ ] Implement one dual simplex pivot step.
