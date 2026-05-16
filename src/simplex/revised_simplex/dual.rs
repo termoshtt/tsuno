@@ -177,7 +177,7 @@ impl DualRevisedSimplex {
             .all(|priced_column| priced_column.reduced_cost >= -tolerance))
     }
 
-    /// Select the basic variable that should leave the basis.
+    /// Select the most infeasible basic variable.
     ///
     /// For dual simplex, the current basis is expected to be dual feasible, but
     /// it may be primal infeasible. Primal feasibility of the basic solution is
@@ -197,11 +197,11 @@ impl DualRevisedSimplex {
     /// $$
     ///
     /// The tolerance $\epsilon$ is [`RevisedSimplexOptions::pivot_tolerance`].
-    pub fn leaving_basic_variable(
+    pub fn most_infeasible_basic_variable(
         &self,
     ) -> Result<Option<LeavingBasicVariable>, StandardFormError> {
         let basic_solution = self.basic_solution()?;
-        Ok(leaving_basic_variable(
+        Ok(most_infeasible_basic_variable(
             &basic_solution,
             self.options.pivot_tolerance,
         ))
@@ -275,7 +275,7 @@ impl DualRevisedSimplex {
     /// test, and replaces the leaving basis column with the selected entering
     /// column.
     pub fn step(&mut self) -> Result<DualSimplexStep, StandardFormError> {
-        let Some(leaving) = self.leaving_basic_variable()? else {
+        let Some(leaving) = self.most_infeasible_basic_variable()? else {
             return Ok(DualSimplexStep::Optimal);
         };
 
@@ -297,7 +297,7 @@ impl DualRevisedSimplex {
     }
 }
 
-fn leaving_basic_variable(
+fn most_infeasible_basic_variable(
     basic_solution: &Array1<f64>,
     tolerance: f64,
 ) -> Option<LeavingBasicVariable> {
@@ -398,10 +398,10 @@ mod tests {
     }
 
     #[test]
-    fn dual_revised_simplex_selects_most_negative_basic_variable() {
+    fn dual_revised_simplex_selects_most_infeasible_basic_variable() {
         let simplex = DualRevisedSimplex::new(two_negative_basic_values_lp(), vec![1, 2]).unwrap();
 
-        let leaving = simplex.leaving_basic_variable().unwrap();
+        let leaving = simplex.most_infeasible_basic_variable().unwrap();
 
         assert_eq!(
             leaving,
@@ -417,7 +417,7 @@ mod tests {
         let simplex =
             DualRevisedSimplex::new(primal_and_dual_feasible_slack_basis_lp(), vec![1, 2]).unwrap();
 
-        let leaving = simplex.leaving_basic_variable().unwrap();
+        let leaving = simplex.most_infeasible_basic_variable().unwrap();
 
         assert_eq!(leaving, None);
     }
@@ -434,7 +434,7 @@ mod tests {
         )
         .unwrap();
 
-        let leaving = simplex.leaving_basic_variable().unwrap();
+        let leaving = simplex.most_infeasible_basic_variable().unwrap();
 
         assert_eq!(leaving, None);
     }
@@ -443,7 +443,7 @@ mod tests {
     fn dual_revised_simplex_computes_pivot_row() {
         let simplex =
             DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
-        let leaving = simplex.leaving_basic_variable().unwrap().unwrap();
+        let leaving = simplex.most_infeasible_basic_variable().unwrap().unwrap();
 
         let pivot_row = simplex.pivot_row(&leaving).unwrap();
 
@@ -454,7 +454,7 @@ mod tests {
     fn dual_revised_simplex_selects_entering_column_by_minimum_ratio_test() {
         let simplex =
             DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
-        let leaving = simplex.leaving_basic_variable().unwrap().unwrap();
+        let leaving = simplex.most_infeasible_basic_variable().unwrap().unwrap();
         let pivot_row = simplex.pivot_row(&leaving).unwrap();
 
         let entering = simplex
