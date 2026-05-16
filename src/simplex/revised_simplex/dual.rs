@@ -236,7 +236,7 @@ impl DualRevisedSimplex {
         Ok(self.lp.a().t().dot(&row_multiplier))
     }
 
-    /// Select the entering column using the dual ratio test.
+    /// Select the entering column using the dual minimum ratio test.
     ///
     /// Given a pivot row $\alpha = A^T B^{-T} e_p$, a nonbasis column can enter
     /// the basis only when
@@ -255,11 +255,11 @@ impl DualRevisedSimplex {
     /// where $r_j = c_j - A_j^T y$ is the current reduced cost. If there is no
     /// candidate, the current dual feasible dictionary proves primal
     /// infeasibility for this leaving row.
-    pub fn entering_column_for_dual_step(
+    pub fn dual_minimum_ratio_test(
         &self,
         pivot_row: &Array1<f64>,
     ) -> Result<Option<DualEnteringColumn>, StandardFormError> {
-        Ok(entering_column_for_dual_step(
+        Ok(dual_minimum_ratio_test(
             self.reduced_costs()?,
             pivot_row,
             self.options.pivot_tolerance,
@@ -280,7 +280,7 @@ impl DualRevisedSimplex {
         };
 
         let pivot_row = self.pivot_row(&leaving)?;
-        let Some(entering) = self.entering_column_for_dual_step(&pivot_row)? else {
+        let Some(entering) = self.dual_minimum_ratio_test(&pivot_row)? else {
             return Ok(DualSimplexStep::Infeasible { leaving, pivot_row });
         };
 
@@ -313,7 +313,7 @@ fn leaving_basic_variable(
         .min_by(|left, right| left.value.total_cmp(&right.value))
 }
 
-fn entering_column_for_dual_step(
+fn dual_minimum_ratio_test(
     reduced_costs: Vec<PricedColumn>,
     pivot_row: &Array1<f64>,
     tolerance: f64,
@@ -451,14 +451,14 @@ mod tests {
     }
 
     #[test]
-    fn dual_revised_simplex_selects_entering_column_by_dual_ratio() {
+    fn dual_revised_simplex_selects_entering_column_by_minimum_ratio_test() {
         let simplex =
             DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
         let leaving = simplex.leaving_basic_variable().unwrap().unwrap();
         let pivot_row = simplex.pivot_row(&leaving).unwrap();
 
         let entering = simplex
-            .entering_column_for_dual_step(&pivot_row)
+            .dual_minimum_ratio_test(&pivot_row)
             .unwrap()
             .unwrap();
 
