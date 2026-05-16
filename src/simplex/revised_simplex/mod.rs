@@ -2,9 +2,11 @@ use ndarray::Array1;
 
 use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
+mod dual;
 mod phase_one;
 mod trace;
 
+pub use dual::*;
 pub use phase_one::*;
 pub use trace::*;
 
