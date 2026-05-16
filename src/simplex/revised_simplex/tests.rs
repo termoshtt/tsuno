@@ -15,7 +15,7 @@ fn revised_simplex_builds_basis_and_computes_basic_solution() {
 }
 
 #[test]
-fn revised_simplex_selects_entering_column_with_options() {
+fn revised_simplex_selects_most_negative_reduced_cost_with_options() {
     let simplex = RevisedSimplex::with_options(
         improving_slack_lp(),
         vec![2, 3],
@@ -26,7 +26,7 @@ fn revised_simplex_selects_entering_column_with_options() {
     )
     .unwrap();
 
-    let entering_column = simplex.entering_column().unwrap();
+    let entering_column = simplex.most_negative_reduced_cost().unwrap();
 
     assert_eq!(
         entering_column,
@@ -54,7 +54,7 @@ fn revised_simplex_respects_reduced_cost_tolerance() {
     )
     .unwrap();
 
-    let entering_column = simplex.entering_column().unwrap();
+    let entering_column = simplex.most_negative_reduced_cost().unwrap();
 
     assert_eq!(entering_column, None);
 }

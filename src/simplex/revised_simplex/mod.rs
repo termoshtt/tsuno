@@ -316,24 +316,25 @@ impl RevisedSimplex {
         self.lp.reduced_costs(&self.basis)
     }
 
-    /// Select the entering column for the current basis.
+    /// Select the nonbasis column with the most negative reduced cost.
     ///
-    /// This is a state-level wrapper around [`StandardFormLp::entering_column`]
-    /// using [`RevisedSimplexOptions::reduced_cost_tolerance`].
-    pub fn entering_column(&self) -> Result<Option<PricedColumn>, StandardFormError> {
+    /// This is a state-level wrapper around
+    /// [`StandardFormLp::most_negative_reduced_cost`] using
+    /// [`RevisedSimplexOptions::reduced_cost_tolerance`].
+    pub fn most_negative_reduced_cost(&self) -> Result<Option<PricedColumn>, StandardFormError> {
         self.lp
-            .entering_column(&self.basis, self.options.reduced_cost_tolerance)
+            .most_negative_reduced_cost(&self.basis, self.options.reduced_cost_tolerance)
     }
 
     pub fn step(&mut self) -> Result<SimplexStep, StandardFormError> {
-        let Some(entering) = self.entering_column()? else {
+        let Some(entering) = self.most_negative_reduced_cost()? else {
             return Ok(SimplexStep::Optimal);
         };
 
         let basic_solution = self.basic_solution()?;
         let direction = self.pivot_direction(entering.column)?;
         let Some(leaving_position) =
-            leaving_position(&basic_solution, &direction, self.options.pivot_tolerance)
+            primal_minimum_ratio_test(&basic_solution, &direction, self.options.pivot_tolerance)
         else {
             return Ok(SimplexStep::Unbounded {
                 entering,
@@ -451,7 +452,7 @@ fn full_primal_solution(
     primal
 }
 
-fn leaving_position(
+fn primal_minimum_ratio_test(
     basic_solution: &Array1<f64>,
     direction: &Array1<f64>,
     tolerance: f64,
