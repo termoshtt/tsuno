@@ -417,9 +417,11 @@ impl DualRevisedSimplex {
     fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
         let basic_solution = self.basic_solution()?;
         let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
+        let dual = self.dual_variables()?;
         let objective_value = self.lp.c().dot(&primal);
         Ok(SimplexSolution {
             primal,
+            dual,
             objective_value,
             basis_indices: self.basis.indices().to_vec(),
             iterations,
@@ -698,6 +700,7 @@ mod tests {
         match result {
             SolveResult::Optimal(solution) => {
                 assert_abs_diff_eq!(solution.primal, array![1.0, 0.0, 1.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.dual, array![-1.0, 0.0], epsilon = 1.0e-9);
                 assert_abs_diff_eq!(solution.objective_value, 1.0, epsilon = 1.0e-9);
                 assert_eq!(solution.basis_indices, vec![0, 2]);
                 assert_eq!(solution.iterations, 1);
@@ -725,6 +728,7 @@ mod tests {
         match result {
             SolveResult::IterationLimit(solution) => {
                 assert_abs_diff_eq!(solution.primal, array![1.0, 0.0, 1.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.dual, array![-1.0, 0.0], epsilon = 1.0e-9);
                 assert_abs_diff_eq!(solution.objective_value, 1.0, epsilon = 1.0e-9);
                 assert_eq!(solution.basis_indices, vec![0, 2]);
                 assert_eq!(solution.iterations, 1);

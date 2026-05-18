@@ -305,9 +305,11 @@ impl RevisedSimplex {
     fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
         let basic_solution = self.basic_solution()?;
         let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
+        let dual = self.dual_variables()?;
         let objective_value = self.lp.c().dot(&primal);
         Ok(SimplexSolution {
             primal,
+            dual,
             objective_value,
             basis_indices: self.basis.indices().to_vec(),
             iterations,
