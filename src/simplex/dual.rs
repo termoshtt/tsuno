@@ -84,6 +84,12 @@ pub enum Step {
 pub enum SolveResult {
     Optimal(SimplexSolution),
     IterationLimit(SimplexSolution),
+    /// The primal standard-form LP is infeasible.
+    ///
+    /// This is not dual infeasibility: dual simplex starts from a dual feasible
+    /// basis. When no eligible entering column exists for a negative basic
+    /// value, the returned Farkas certificate proves infeasibility of the
+    /// primal system $Ax=b,\ x\ge 0$.
     Infeasible {
         leaving: LeavingBasicVariable,
         pivot_row: Array1<f64>,
