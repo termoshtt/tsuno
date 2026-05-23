@@ -42,8 +42,19 @@ impl Default for RevisedSimplexOptions {
 /// $$
 ///
 /// The objective value is $c^T x$.
+///
+/// The `dual` vector is the basis dual vector
+///
+/// $$
+/// B^T y = c_I.
+/// $$
+///
+/// For an optimal result, this is an optimal dual solution. For an
+/// iteration-limit result, it is still the dual vector associated with the
+/// returned basis, but optimality has not been proved.
 pub struct SimplexSolution {
     pub primal: Array1<f64>,
+    pub dual: Array1<f64>,
     pub objective_value: f64,
     pub basis_indices: Vec<usize>,
     pub iterations: usize,

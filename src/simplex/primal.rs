@@ -2,7 +2,7 @@ use ndarray::Array1;
 
 use super::revised_simplex::{
     RevisedSimplexOptions, SimplexError, SimplexResult, SimplexSolution, SimplexTrace,
-    SimplexTraceEvent, SimplexTracePhase,
+    SimplexTraceEvent, SimplexTracePhase, SimplexTraceStep,
 };
 use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
 
@@ -275,7 +275,7 @@ impl RevisedSimplex {
             let step = self.step()?;
             trace.step_completed(SimplexTraceEvent {
                 iteration,
-                step: &step,
+                step: SimplexTraceStep::Primal(&step),
                 basis_after: self.basis.indices(),
             });
 
@@ -305,9 +305,11 @@ impl RevisedSimplex {
     fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
         let basic_solution = self.basic_solution()?;
         let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
+        let dual = self.dual_variables()?;
         let objective_value = self.lp.c().dot(&primal);
         Ok(SimplexSolution {
             primal,
+            dual,
             objective_value,
             basis_indices: self.basis.indices().to_vec(),
             iterations,

@@ -1,7 +1,9 @@
 use ndarray::Array1;
 
-use super::RevisedSimplexOptions;
-use crate::simplex::{Basis, PricedColumn, StandardFormError, StandardFormLp};
+use super::{
+    RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTraceStep,
+};
+use crate::simplex::{Basis, FarkasCertificate, PricedColumn, StandardFormError, StandardFormLp};
 
 #[derive(Clone, Debug, PartialEq)]
 #[katexit::katexit]
@@ -51,6 +53,19 @@ pub struct EnteringColumn {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Error returned while constructing a dual revised simplex state.
+pub enum DualSimplexError {
+    Problem(StandardFormError),
+    DualInfeasibleInitialBasis { column: usize, reduced_cost: f64 },
+}
+
+impl From<StandardFormError> for DualSimplexError {
+    fn from(error: StandardFormError) -> Self {
+        DualSimplexError::Problem(error)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Step {
     Optimal,
     Infeasible {
@@ -61,6 +76,39 @@ pub enum Step {
         leaving: LeavingBasicVariable,
         entering: EnteringColumn,
         pivot_row: Array1<f64>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[katexit::katexit]
+/// Outcome of repeatedly applying dual revised simplex steps.
+///
+/// A dual revised simplex solve assumes the initial basis is dual feasible.
+/// For the standard-form minimization problem, that means there exists a dual
+/// vector $y$ satisfying
+///
+/// $$
+/// A^T y \le c.
+/// $$
+///
+/// Therefore the primal objective is bounded below by $b^T y$ whenever the
+/// primal is feasible. Under this starting condition, the primal problem cannot
+/// be unbounded. The remaining terminal outcomes are optimality, primal
+/// infeasibility, or an iteration limit before either conclusion is proved.
+pub enum SolveResult {
+    Optimal(SimplexSolution),
+    IterationLimit(SimplexSolution),
+    /// The primal standard-form LP is infeasible.
+    ///
+    /// This is not dual infeasibility: dual simplex starts from a dual feasible
+    /// basis. When no eligible entering column exists for a negative basic
+    /// value, the returned Farkas certificate proves infeasibility of the
+    /// primal system $Ax=b,\ x\ge 0$.
+    Infeasible {
+        leaving: LeavingBasicVariable,
+        pivot_row: Array1<f64>,
+        certificate: FarkasCertificate,
+        iterations: usize,
     },
 }
 
@@ -96,9 +144,41 @@ pub enum Step {
 /// r_j \ge -\epsilon \quad (j \notin I),
 /// $$
 ///
-/// and then repairs negative basic primal values. This first implementation
-/// slice exposes the shared basis-level quantities and one dual simplex step.
-/// The repeated solve loop and trace integration are added separately.
+/// and then repairs negative basic primal values.
+///
+/// A value of this type has a dual-feasible basis as a type invariant:
+///
+/// $$
+/// r_j \ge -\epsilon \quad (j \notin I).
+/// $$
+///
+/// The constructors reject a basis that violates this condition.
+///
+/// One dual revised simplex step chooses a leaving basis position
+///
+/// $$
+/// p \in \operatorname*{argmin}_i (x_I)_i
+/// \quad\text{subject to}\quad
+/// (x_I)_i < -\epsilon,
+/// $$
+///
+/// computes the pivot row
+///
+/// $$
+/// \alpha_j = A_j^T B^{-T} e_p,
+/// $$
+///
+/// and chooses the entering column by the dual minimum ratio test
+///
+/// $$
+/// q \in \operatorname*{argmin}_{j:\ \alpha_j < -\epsilon}
+/// \frac{r_j}{-\alpha_j}.
+/// $$
+///
+/// If no basic value is negative, the dual-feasible basis is also primal
+/// feasible and therefore optimal. If a leaving row has no eligible entering
+/// column, the dual feasible dictionary proves primal infeasibility for the
+/// current standard-form LP.
 pub struct DualRevisedSimplex {
     lp: StandardFormLp,
     basis: Basis,
@@ -106,7 +186,7 @@ pub struct DualRevisedSimplex {
 }
 
 impl DualRevisedSimplex {
-    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, StandardFormError> {
+    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, DualSimplexError> {
         Self::with_options(lp, basis_indices, RevisedSimplexOptions::default())
     }
 
@@ -114,8 +194,16 @@ impl DualRevisedSimplex {
         lp: StandardFormLp,
         basis_indices: Vec<usize>,
         options: RevisedSimplexOptions,
-    ) -> Result<Self, StandardFormError> {
+    ) -> Result<Self, DualSimplexError> {
         let basis = lp.basis(basis_indices)?;
+        if let Some(priced_column) =
+            dual_infeasible_column(&lp, &basis, options.reduced_cost_tolerance)?
+        {
+            return Err(DualSimplexError::DualInfeasibleInitialBasis {
+                column: priced_column.column,
+                reduced_cost: priced_column.reduced_cost,
+            });
+        }
         Ok(Self { lp, basis, options })
     }
 
@@ -156,25 +244,6 @@ impl DualRevisedSimplex {
     /// [`RevisedSimplexOptions::reduced_cost_tolerance`].
     pub fn reduced_costs(&self) -> Result<Vec<PricedColumn>, StandardFormError> {
         self.lp.reduced_costs(&self.basis)
-    }
-
-    /// Check whether the current basis is dual feasible within tolerance.
-    ///
-    /// This tests
-    ///
-    /// $$
-    /// r_j \ge -\epsilon \quad (j \notin I),
-    /// $$
-    ///
-    /// with $\epsilon$ taken from
-    /// [`RevisedSimplexOptions::reduced_cost_tolerance`]. A dual simplex
-    /// implementation should only pivot from bases satisfying this condition.
-    pub fn is_dual_feasible(&self) -> Result<bool, StandardFormError> {
-        let tolerance = self.options.reduced_cost_tolerance.max(0.0);
-        Ok(self
-            .reduced_costs()?
-            .iter()
-            .all(|priced_column| priced_column.reduced_cost >= -tolerance))
     }
 
     /// Select the most infeasible basic variable.
@@ -230,10 +299,34 @@ impl DualRevisedSimplex {
         &self,
         leaving: &LeavingBasicVariable,
     ) -> Result<Array1<f64>, StandardFormError> {
+        let row_multiplier = self.infeasibility_certificate(leaving).multiplier;
+        Ok(self.lp.a().t().dot(&row_multiplier))
+    }
+
+    /// Build the Farkas multiplier associated with a dual infeasible row.
+    ///
+    /// For a leaving basis position $p$, this returns
+    ///
+    /// $$
+    /// u = B^{-T} e_p.
+    /// $$
+    ///
+    /// If the corresponding pivot row $\alpha = A^T u$ has no eligible
+    /// entering nonbasis column, dual feasibility implies $A^T u \ge 0$.
+    /// Since the selected basic value is
+    ///
+    /// $$
+    /// (x_I)_p = e_p^T B^{-1} b = b^T B^{-T} e_p = b^T u < 0,
+    /// $$
+    ///
+    /// this $u$ is a Farkas certificate for infeasibility of
+    /// $Ax=b,\ x\ge 0$.
+    pub fn infeasibility_certificate(&self, leaving: &LeavingBasicVariable) -> FarkasCertificate {
         let mut unit = Array1::zeros(self.lp.a().nrows());
         unit[leaving.position] = 1.0;
-        let row_multiplier = self.basis.solve_transposed(&unit);
-        Ok(self.lp.a().t().dot(&row_multiplier))
+        FarkasCertificate {
+            multiplier: self.basis.solve_transposed(&unit),
+        }
     }
 
     /// Select the entering column using the dual minimum ratio test.
@@ -295,6 +388,100 @@ impl DualRevisedSimplex {
             pivot_row,
         })
     }
+
+    /// Repeatedly apply dual revised simplex steps until termination.
+    ///
+    /// Each iteration applies [`DualRevisedSimplex::step`]. The method assumes
+    /// the initial basis is dual feasible:
+    ///
+    /// $$
+    /// r_j \ge -\epsilon \quad (j \notin I).
+    /// $$
+    ///
+    /// If all basic values also satisfy
+    ///
+    /// $$
+    /// x_I = B^{-1} b \ge -\epsilon,
+    /// $$
+    ///
+    /// the current basis is optimal. If a negative basic value is selected but
+    /// its pivot row has no entering candidate with $\alpha_j < -\epsilon$, the
+    /// problem is reported as infeasible. If neither terminal condition occurs
+    /// before [`RevisedSimplexOptions::max_iterations`] step attempts, this
+    /// returns [`SolveResult::IterationLimit`] with the current basic solution.
+    pub fn solve(
+        &mut self,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<SolveResult, StandardFormError> {
+        for iteration in 0..self.options.max_iterations {
+            trace.step_started(iteration, self.basis.indices());
+            let step = self.step()?;
+            trace.step_completed(SimplexTraceEvent {
+                iteration,
+                step: SimplexTraceStep::Dual(&step),
+                basis_after: self.basis.indices(),
+            });
+
+            match step {
+                Step::Optimal => {
+                    return Ok(SolveResult::Optimal(self.current_solution(iteration)?));
+                }
+                Step::Infeasible { leaving, pivot_row } => {
+                    let certificate = self.infeasibility_certificate(&leaving);
+                    return Ok(SolveResult::Infeasible {
+                        leaving,
+                        pivot_row,
+                        certificate,
+                        iterations: iteration,
+                    });
+                }
+                Step::Pivoted { .. } => {}
+            }
+        }
+
+        Ok(SolveResult::IterationLimit(
+            self.current_solution(self.options.max_iterations)?,
+        ))
+    }
+
+    fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
+        let basic_solution = self.basic_solution()?;
+        let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
+        let dual = self.dual_variables()?;
+        let objective_value = self.lp.c().dot(&primal);
+        Ok(SimplexSolution {
+            primal,
+            dual,
+            objective_value,
+            basis_indices: self.basis.indices().to_vec(),
+            iterations,
+        })
+    }
+}
+
+fn full_primal_solution(
+    dimension: usize,
+    basis_indices: &[usize],
+    basic_solution: &Array1<f64>,
+) -> Array1<f64> {
+    let mut primal = Array1::zeros(dimension);
+    for (&column, &value) in basis_indices.iter().zip(basic_solution.iter()) {
+        primal[column] = value;
+    }
+    primal
+}
+
+fn dual_infeasible_column(
+    lp: &StandardFormLp,
+    basis: &Basis,
+    tolerance: f64,
+) -> Result<Option<PricedColumn>, StandardFormError> {
+    let tolerance = tolerance.max(0.0);
+    Ok(lp
+        .reduced_costs(basis)?
+        .into_iter()
+        .filter(|priced_column| priced_column.reduced_cost < -tolerance)
+        .min_by(|left, right| left.reduced_cost.total_cmp(&right.reduced_cost)))
 }
 
 fn most_infeasible_basic_variable(
@@ -339,6 +526,7 @@ mod tests {
     use ndarray::array;
 
     use super::*;
+    use crate::simplex::FullTrace;
 
     #[test]
     fn dual_revised_simplex_builds_basis_and_exposes_state() {
@@ -382,19 +570,31 @@ mod tests {
     }
 
     #[test]
-    fn dual_revised_simplex_reports_dual_feasibility() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+    fn dual_revised_simplex_rejects_dual_infeasible_initial_basis() {
+        let error =
+            DualRevisedSimplex::new(dual_infeasible_slack_basis_lp(), vec![1, 2]).unwrap_err();
 
-        assert!(simplex.is_dual_feasible().unwrap());
+        assert_eq!(
+            error,
+            DualSimplexError::DualInfeasibleInitialBasis {
+                column: 0,
+                reduced_cost: -1.0,
+            }
+        );
     }
 
     #[test]
-    fn dual_revised_simplex_reports_dual_infeasibility() {
+    fn dual_revised_simplex_accepts_reduced_cost_within_tolerance() {
         let simplex =
-            DualRevisedSimplex::new(dual_infeasible_slack_basis_lp(), vec![1, 2]).unwrap();
+            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
 
-        assert!(!simplex.is_dual_feasible().unwrap());
+        assert_eq!(
+            simplex.reduced_costs().unwrap(),
+            vec![PricedColumn {
+                column: 0,
+                reduced_cost: 1.0,
+            }]
+        );
     }
 
     #[test]
@@ -504,7 +704,13 @@ mod tests {
             array![1.0, 1.0],
             epsilon = 1.0e-9
         );
-        assert!(simplex.is_dual_feasible().unwrap());
+        assert!(
+            simplex
+                .reduced_costs()
+                .unwrap()
+                .iter()
+                .all(|priced_column| priced_column.reduced_cost >= -1.0e-9)
+        );
     }
 
     #[test]
@@ -542,6 +748,95 @@ mod tests {
             _ => panic!("expected infeasible dual step"),
         }
         assert_eq!(simplex.basis().indices(), &[1, 2]);
+    }
+
+    #[test]
+    fn dual_revised_simplex_solve_returns_optimal_solution() {
+        let mut simplex =
+            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let mut trace = FullTrace::default();
+
+        let result = simplex.solve(&mut trace).unwrap();
+
+        match result {
+            SolveResult::Optimal(solution) => {
+                assert_abs_diff_eq!(solution.primal, array![1.0, 0.0, 1.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.dual, array![-1.0, 0.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.objective_value, 1.0, epsilon = 1.0e-9);
+                assert_eq!(solution.basis_indices, vec![0, 2]);
+                assert_eq!(solution.iterations, 1);
+            }
+            _ => panic!("expected an optimal dual simplex solution"),
+        }
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn dual_revised_simplex_solve_returns_iteration_limit_solution() {
+        let mut simplex = DualRevisedSimplex::with_options(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions {
+                max_iterations: 1,
+                ..RevisedSimplexOptions::default()
+            },
+        )
+        .unwrap();
+        let mut trace = FullTrace::default();
+
+        let result = simplex.solve(&mut trace).unwrap();
+
+        match result {
+            SolveResult::IterationLimit(solution) => {
+                assert_abs_diff_eq!(solution.primal, array![1.0, 0.0, 1.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.dual, array![-1.0, 0.0], epsilon = 1.0e-9);
+                assert_abs_diff_eq!(solution.objective_value, 1.0, epsilon = 1.0e-9);
+                assert_eq!(solution.basis_indices, vec![0, 2]);
+                assert_eq!(solution.iterations, 1);
+            }
+            _ => panic!("expected a dual simplex iteration-limit solution"),
+        }
+        insta::assert_snapshot!(trace);
+    }
+
+    #[test]
+    fn dual_revised_simplex_solve_returns_infeasible_result() {
+        let mut simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_without_entering_lp(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let mut trace = FullTrace::default();
+
+        let result = simplex.solve(&mut trace).unwrap();
+
+        match result {
+            SolveResult::Infeasible {
+                leaving,
+                pivot_row,
+                certificate,
+                iterations,
+            } => {
+                assert_eq!(
+                    leaving,
+                    LeavingBasicVariable {
+                        position: 0,
+                        value: -1.0,
+                    }
+                );
+                assert_abs_diff_eq!(pivot_row, array![1.0, 1.0, 0.0], epsilon = 1.0e-9);
+                let verification = certificate
+                    .verify(simplex.lp(), 1.0e-9)
+                    .expect("certificate should have the right dimension");
+                assert!(
+                    verification.valid,
+                    "expected valid certificate, got {verification:?}"
+                );
+                assert_eq!(iterations, 0);
+            }
+            _ => panic!("expected a dual simplex infeasible result"),
+        }
+        insta::assert_snapshot!(trace);
     }
 
     fn dual_feasible_primal_infeasible_lp() -> StandardFormLp {

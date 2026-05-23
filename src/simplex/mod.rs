@@ -8,5 +8,6 @@ pub use basis::*;
 pub use revised_simplex::{
     FullTrace, FullTraceOutcome, FullTraceStep, NoTrace, RevisedSimplexOptions, SimplexError,
     SimplexResult, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTracePhase,
+    SimplexTraceStep,
 };
 pub use standard_form::*;
