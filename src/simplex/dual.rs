@@ -67,6 +67,7 @@ pub enum Step {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[katexit::katexit]
 /// Outcome of repeatedly applying dual revised simplex steps.
 ///
 /// A dual revised simplex solve assumes the initial basis is dual feasible.
