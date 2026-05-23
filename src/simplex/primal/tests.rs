@@ -6,7 +6,8 @@ use crate::simplex::{FullTrace, StandardFormLp};
 
 #[test]
 fn revised_simplex_builds_basis_and_computes_basic_solution() {
-    let simplex = RevisedSimplex::new(example_lp(), vec![0, 1]).unwrap();
+    let simplex =
+        RevisedSimplex::new(example_lp(), vec![0, 1], RevisedSimplexOptions::default()).unwrap();
 
     let basic_solution = simplex.basic_solution().unwrap();
 
@@ -16,7 +17,8 @@ fn revised_simplex_builds_basis_and_computes_basic_solution() {
 
 #[test]
 fn revised_simplex_rejects_primal_infeasible_initial_basis() {
-    let error = RevisedSimplex::new(unbounded_lp(), vec![0]).unwrap_err();
+    let error =
+        RevisedSimplex::new(unbounded_lp(), vec![0], RevisedSimplexOptions::default()).unwrap_err();
 
     assert_eq!(
         error,
@@ -28,8 +30,8 @@ fn revised_simplex_rejects_primal_infeasible_initial_basis() {
 }
 
 #[test]
-fn revised_simplex_selects_most_negative_reduced_cost_with_options() {
-    let simplex = RevisedSimplex::with_options(
+fn revised_simplex_selects_most_negative_reduced_cost_with_custom_options() {
+    let simplex = RevisedSimplex::new(
         improving_slack_lp(),
         vec![2, 3],
         RevisedSimplexOptions {
@@ -52,7 +54,7 @@ fn revised_simplex_selects_most_negative_reduced_cost_with_options() {
 
 #[test]
 fn revised_simplex_respects_reduced_cost_tolerance() {
-    let simplex = RevisedSimplex::with_options(
+    let simplex = RevisedSimplex::new(
         StandardFormLp::new(
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
             array![4.0, 3.0],
@@ -74,7 +76,8 @@ fn revised_simplex_respects_reduced_cost_tolerance() {
 
 #[test]
 fn revised_simplex_step_reports_optimal_basis() {
-    let mut simplex = RevisedSimplex::new(slack_lp(), vec![2, 3]).unwrap();
+    let mut simplex =
+        RevisedSimplex::new(slack_lp(), vec![2, 3], RevisedSimplexOptions::default()).unwrap();
 
     let step = simplex.step().unwrap();
 
@@ -84,7 +87,12 @@ fn revised_simplex_step_reports_optimal_basis() {
 
 #[test]
 fn revised_simplex_step_pivots_basis() {
-    let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
+    let mut simplex = RevisedSimplex::new(
+        improving_slack_lp(),
+        vec![2, 3],
+        RevisedSimplexOptions::default(),
+    )
+    .unwrap();
 
     let step = simplex.step().unwrap();
 
@@ -112,7 +120,8 @@ fn revised_simplex_step_pivots_basis() {
 
 #[test]
 fn revised_simplex_step_reports_unbounded_direction() {
-    let mut simplex = RevisedSimplex::new(unbounded_lp(), vec![1]).unwrap();
+    let mut simplex =
+        RevisedSimplex::new(unbounded_lp(), vec![1], RevisedSimplexOptions::default()).unwrap();
 
     let step = simplex.step().unwrap();
 
@@ -137,7 +146,12 @@ fn revised_simplex_step_reports_unbounded_direction() {
 
 #[test]
 fn revised_simplex_solve_returns_optimal_solution() {
-    let mut simplex = RevisedSimplex::new(improving_slack_lp(), vec![2, 3]).unwrap();
+    let mut simplex = RevisedSimplex::new(
+        improving_slack_lp(),
+        vec![2, 3],
+        RevisedSimplexOptions::default(),
+    )
+    .unwrap();
     let mut trace = FullTrace::default();
 
     let result = simplex.solve(&mut trace).unwrap();
@@ -160,7 +174,8 @@ fn revised_simplex_solve_returns_optimal_solution() {
 
 #[test]
 fn revised_simplex_solve_returns_unbounded_result() {
-    let mut simplex = RevisedSimplex::new(unbounded_lp(), vec![1]).unwrap();
+    let mut simplex =
+        RevisedSimplex::new(unbounded_lp(), vec![1], RevisedSimplexOptions::default()).unwrap();
     let mut trace = FullTrace::default();
 
     let result = simplex.solve(&mut trace).unwrap();
@@ -188,7 +203,7 @@ fn revised_simplex_solve_returns_unbounded_result() {
 
 #[test]
 fn revised_simplex_solve_returns_iteration_limit_solution() {
-    let mut simplex = RevisedSimplex::with_options(
+    let mut simplex = RevisedSimplex::new(
         improving_slack_lp(),
         vec![2, 3],
         RevisedSimplexOptions {
@@ -219,7 +234,7 @@ fn revised_simplex_solve_returns_iteration_limit_solution() {
 
 #[test]
 fn revised_simplex_can_continue_after_iteration_limit() {
-    let mut simplex = RevisedSimplex::with_options(
+    let mut simplex = RevisedSimplex::new(
         improving_slack_lp(),
         vec![2, 3],
         RevisedSimplexOptions {

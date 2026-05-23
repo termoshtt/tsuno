@@ -104,7 +104,7 @@ pub fn solve(
 ) -> Result<SimplexResult, SimplexError> {
     match PhaseOneAuxiliaryProblem::new(&lp).solve(options.clone(), trace)? {
         PhaseOneResult::Feasible { basis_indices } => {
-            let mut simplex = RevisedSimplex::with_options(lp, basis_indices, options)?;
+            let mut simplex = RevisedSimplex::new(lp, basis_indices, options)?;
             trace.phase_started(SimplexTracePhase::PhaseTwo);
             simplex.solve(trace).map(SimplexResult::from)
         }
@@ -167,11 +167,7 @@ pub struct RevisedSimplex {
 }
 
 impl RevisedSimplex {
-    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, PrimalSimplexError> {
-        Self::with_options(lp, basis_indices, RevisedSimplexOptions::default())
-    }
-
-    pub fn with_options(
+    pub fn new(
         lp: StandardFormLp,
         basis_indices: Vec<usize>,
         options: RevisedSimplexOptions,

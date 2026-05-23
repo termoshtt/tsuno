@@ -186,11 +186,7 @@ pub struct DualRevisedSimplex {
 }
 
 impl DualRevisedSimplex {
-    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, DualSimplexError> {
-        Self::with_options(lp, basis_indices, RevisedSimplexOptions::default())
-    }
-
-    pub fn with_options(
+    pub fn new(
         lp: StandardFormLp,
         basis_indices: Vec<usize>,
         options: RevisedSimplexOptions,
@@ -530,8 +526,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_builds_basis_and_exposes_state() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(simplex.basis().indices(), &[1, 2]);
         assert_eq!(simplex.lp().a().nrows(), 2);
@@ -543,8 +543,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_computes_basic_solution() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         let basic_solution = simplex.basic_solution().unwrap();
 
@@ -553,8 +557,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_computes_dual_variables_and_reduced_costs() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         let dual_variables = simplex.dual_variables().unwrap();
         let reduced_costs = simplex.reduced_costs().unwrap();
@@ -571,8 +579,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_rejects_dual_infeasible_initial_basis() {
-        let error =
-            DualRevisedSimplex::new(dual_infeasible_slack_basis_lp(), vec![1, 2]).unwrap_err();
+        let error = DualRevisedSimplex::new(
+            dual_infeasible_slack_basis_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap_err();
 
         assert_eq!(
             error,
@@ -585,8 +597,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_accepts_reduced_cost_within_tolerance() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             simplex.reduced_costs().unwrap(),
@@ -599,7 +615,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_selects_most_infeasible_basic_variable() {
-        let simplex = DualRevisedSimplex::new(two_negative_basic_values_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            two_negative_basic_values_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         let leaving = simplex.most_infeasible_basic_variable().unwrap();
 
@@ -614,8 +635,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_returns_none_when_basic_solution_is_primal_feasible() {
-        let simplex =
-            DualRevisedSimplex::new(primal_and_dual_feasible_slack_basis_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            primal_and_dual_feasible_slack_basis_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         let leaving = simplex.most_infeasible_basic_variable().unwrap();
 
@@ -624,7 +649,7 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_leaving_selection_respects_pivot_tolerance() {
-        let simplex = DualRevisedSimplex::with_options(
+        let simplex = DualRevisedSimplex::new(
             nearly_primal_feasible_slack_basis_lp(),
             vec![1, 2],
             RevisedSimplexOptions {
@@ -641,8 +666,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_computes_pivot_row() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
         let leaving = simplex.most_infeasible_basic_variable().unwrap().unwrap();
 
         let pivot_row = simplex.pivot_row(&leaving).unwrap();
@@ -652,8 +681,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_selects_entering_column_by_minimum_ratio_test() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
         let leaving = simplex.most_infeasible_basic_variable().unwrap().unwrap();
         let pivot_row = simplex.pivot_row(&leaving).unwrap();
 
@@ -675,8 +708,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_step_pivots_basis() {
-        let mut simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let mut simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         let step = simplex.step().unwrap();
 
@@ -715,8 +752,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_step_reports_optimal_when_primal_feasible() {
-        let mut simplex =
-            DualRevisedSimplex::new(primal_and_dual_feasible_slack_basis_lp(), vec![1, 2]).unwrap();
+        let mut simplex = DualRevisedSimplex::new(
+            primal_and_dual_feasible_slack_basis_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
 
         let step = simplex.step().unwrap();
 
@@ -729,6 +770,7 @@ mod tests {
         let mut simplex = DualRevisedSimplex::new(
             dual_feasible_primal_infeasible_without_entering_lp(),
             vec![1, 2],
+            RevisedSimplexOptions::default(),
         )
         .unwrap();
 
@@ -752,8 +794,12 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_solve_returns_optimal_solution() {
-        let mut simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+        let mut simplex = DualRevisedSimplex::new(
+            dual_feasible_primal_infeasible_lp(),
+            vec![1, 2],
+            RevisedSimplexOptions::default(),
+        )
+        .unwrap();
         let mut trace = FullTrace::default();
 
         let result = simplex.solve(&mut trace).unwrap();
@@ -773,7 +819,7 @@ mod tests {
 
     #[test]
     fn dual_revised_simplex_solve_returns_iteration_limit_solution() {
-        let mut simplex = DualRevisedSimplex::with_options(
+        let mut simplex = DualRevisedSimplex::new(
             dual_feasible_primal_infeasible_lp(),
             vec![1, 2],
             RevisedSimplexOptions {
@@ -804,6 +850,7 @@ mod tests {
         let mut simplex = DualRevisedSimplex::new(
             dual_feasible_primal_infeasible_without_entering_lp(),
             vec![1, 2],
+            RevisedSimplexOptions::default(),
         )
         .unwrap();
         let mut trace = FullTrace::default();
