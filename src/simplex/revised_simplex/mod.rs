@@ -2,7 +2,7 @@ use ndarray::Array1;
 
 use super::{PricedColumn, StandardFormError};
 use crate::simplex::primal::{
-    PhaseOneError, PhaseOneInfeasible, PhaseOneIterationLimit, SolveResult,
+    PhaseOneError, PhaseOneInfeasible, PhaseOneIterationLimit, PrimalSimplexError, SolveResult,
 };
 
 mod trace;
@@ -96,12 +96,22 @@ impl From<SolveResult> for SimplexResult {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SimplexError {
     Problem(StandardFormError),
+    Primal(PrimalSimplexError),
     PhaseOne(PhaseOneError),
 }
 
 impl From<StandardFormError> for SimplexError {
     fn from(error: StandardFormError) -> Self {
         SimplexError::Problem(error)
+    }
+}
+
+impl From<PrimalSimplexError> for SimplexError {
+    fn from(error: PrimalSimplexError) -> Self {
+        match error {
+            PrimalSimplexError::Problem(error) => SimplexError::Problem(error),
+            error => SimplexError::Primal(error),
+        }
     }
 }
 

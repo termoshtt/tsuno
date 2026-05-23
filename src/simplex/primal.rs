@@ -32,6 +32,19 @@ struct LeavingPosition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Error returned while constructing a primal revised simplex state.
+pub enum PrimalSimplexError {
+    Problem(StandardFormError),
+    PrimalInfeasibleInitialBasis { position: usize, value: f64 },
+}
+
+impl From<StandardFormError> for PrimalSimplexError {
+    fn from(error: StandardFormError) -> Self {
+        PrimalSimplexError::Problem(error)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Step {
     Optimal,
     Unbounded {
@@ -121,6 +134,14 @@ pub fn solve(
 /// x_I = B^{-1} b \ge 0,
 /// $$
 ///
+/// A value of this type has a primal-feasible basis as a type invariant:
+///
+/// $$
+/// x_I \ge -\epsilon.
+/// $$
+///
+/// The constructors reject a basis that violates this condition.
+///
 /// and repairs a negative reduced cost. It first chooses a nonbasis column
 /// with the most negative reduced cost, computes
 ///
@@ -146,7 +167,7 @@ pub struct RevisedSimplex {
 }
 
 impl RevisedSimplex {
-    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, StandardFormError> {
+    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, PrimalSimplexError> {
         Self::with_options(lp, basis_indices, RevisedSimplexOptions::default())
     }
 
@@ -154,8 +175,13 @@ impl RevisedSimplex {
         lp: StandardFormLp,
         basis_indices: Vec<usize>,
         options: RevisedSimplexOptions,
-    ) -> Result<Self, StandardFormError> {
+    ) -> Result<Self, PrimalSimplexError> {
         let basis = lp.basis(basis_indices)?;
+        if let Some((position, value)) =
+            primal_infeasible_basic_value(&lp, &basis, options.pivot_tolerance)?
+        {
+            return Err(PrimalSimplexError::PrimalInfeasibleInitialBasis { position, value });
+        }
         Ok(Self { lp, basis, options })
     }
 
@@ -327,6 +353,21 @@ fn full_primal_solution(
         primal[column] = value;
     }
     primal
+}
+
+fn primal_infeasible_basic_value(
+    lp: &StandardFormLp,
+    basis: &Basis,
+    tolerance: f64,
+) -> Result<Option<(usize, f64)>, StandardFormError> {
+    let tolerance = tolerance.max(0.0);
+    Ok(lp
+        .basic_solution(basis)?
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, value)| *value < -tolerance)
+        .min_by(|left, right| left.1.total_cmp(&right.1)))
 }
 
 fn primal_minimum_ratio_test(

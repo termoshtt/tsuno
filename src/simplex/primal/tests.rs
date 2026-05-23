@@ -15,6 +15,19 @@ fn revised_simplex_builds_basis_and_computes_basic_solution() {
 }
 
 #[test]
+fn revised_simplex_rejects_primal_infeasible_initial_basis() {
+    let error = RevisedSimplex::new(unbounded_lp(), vec![0]).unwrap_err();
+
+    assert_eq!(
+        error,
+        PrimalSimplexError::PrimalInfeasibleInitialBasis {
+            position: 0,
+            value: -1.0,
+        }
+    );
+}
+
+#[test]
 fn revised_simplex_selects_most_negative_reduced_cost_with_options() {
     let simplex = RevisedSimplex::with_options(
         improving_slack_lp(),
