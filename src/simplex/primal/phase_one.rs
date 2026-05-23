@@ -117,7 +117,7 @@ impl PhaseOneAuxiliaryProblem {
     ) -> Result<PhaseOneResult, PhaseOneError> {
         let original_column_count = self.original_column_count;
         let row_signs = self.row_signs;
-        let mut simplex = RevisedSimplex::with_options(
+        let mut simplex = RevisedSimplex::new(
             self.auxiliary_lp,
             self.initial_basis_indices,
             options.clone(),
