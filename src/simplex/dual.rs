@@ -53,6 +53,19 @@ pub struct EnteringColumn {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Error returned while constructing a dual revised simplex state.
+pub enum DualSimplexError {
+    Problem(StandardFormError),
+    DualInfeasibleInitialBasis { column: usize, reduced_cost: f64 },
+}
+
+impl From<StandardFormError> for DualSimplexError {
+    fn from(error: StandardFormError) -> Self {
+        DualSimplexError::Problem(error)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Step {
     Optimal,
     Infeasible {
@@ -133,6 +146,14 @@ pub enum SolveResult {
 ///
 /// and then repairs negative basic primal values.
 ///
+/// A value of this type has a dual-feasible basis as a type invariant:
+///
+/// $$
+/// r_j \ge -\epsilon \quad (j \notin I).
+/// $$
+///
+/// The constructors reject a basis that violates this condition.
+///
 /// One dual revised simplex step chooses a leaving basis position
 ///
 /// $$
@@ -165,7 +186,7 @@ pub struct DualRevisedSimplex {
 }
 
 impl DualRevisedSimplex {
-    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, StandardFormError> {
+    pub fn new(lp: StandardFormLp, basis_indices: Vec<usize>) -> Result<Self, DualSimplexError> {
         Self::with_options(lp, basis_indices, RevisedSimplexOptions::default())
     }
 
@@ -173,8 +194,16 @@ impl DualRevisedSimplex {
         lp: StandardFormLp,
         basis_indices: Vec<usize>,
         options: RevisedSimplexOptions,
-    ) -> Result<Self, StandardFormError> {
+    ) -> Result<Self, DualSimplexError> {
         let basis = lp.basis(basis_indices)?;
+        if let Some(priced_column) =
+            dual_infeasible_column(&lp, &basis, options.reduced_cost_tolerance)?
+        {
+            return Err(DualSimplexError::DualInfeasibleInitialBasis {
+                column: priced_column.column,
+                reduced_cost: priced_column.reduced_cost,
+            });
+        }
         Ok(Self { lp, basis, options })
     }
 
@@ -215,25 +244,6 @@ impl DualRevisedSimplex {
     /// [`RevisedSimplexOptions::reduced_cost_tolerance`].
     pub fn reduced_costs(&self) -> Result<Vec<PricedColumn>, StandardFormError> {
         self.lp.reduced_costs(&self.basis)
-    }
-
-    /// Check whether the current basis is dual feasible within tolerance.
-    ///
-    /// This tests
-    ///
-    /// $$
-    /// r_j \ge -\epsilon \quad (j \notin I),
-    /// $$
-    ///
-    /// with $\epsilon$ taken from
-    /// [`RevisedSimplexOptions::reduced_cost_tolerance`]. A dual simplex
-    /// implementation should only pivot from bases satisfying this condition.
-    pub fn is_dual_feasible(&self) -> Result<bool, StandardFormError> {
-        let tolerance = self.options.reduced_cost_tolerance.max(0.0);
-        Ok(self
-            .reduced_costs()?
-            .iter()
-            .all(|priced_column| priced_column.reduced_cost >= -tolerance))
     }
 
     /// Select the most infeasible basic variable.
@@ -461,6 +471,19 @@ fn full_primal_solution(
     primal
 }
 
+fn dual_infeasible_column(
+    lp: &StandardFormLp,
+    basis: &Basis,
+    tolerance: f64,
+) -> Result<Option<PricedColumn>, StandardFormError> {
+    let tolerance = tolerance.max(0.0);
+    Ok(lp
+        .reduced_costs(basis)?
+        .into_iter()
+        .filter(|priced_column| priced_column.reduced_cost < -tolerance)
+        .min_by(|left, right| left.reduced_cost.total_cmp(&right.reduced_cost)))
+}
+
 fn most_infeasible_basic_variable(
     basic_solution: &Array1<f64>,
     tolerance: f64,
@@ -547,19 +570,31 @@ mod tests {
     }
 
     #[test]
-    fn dual_revised_simplex_reports_dual_feasibility() {
-        let simplex =
-            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
+    fn dual_revised_simplex_rejects_dual_infeasible_initial_basis() {
+        let error =
+            DualRevisedSimplex::new(dual_infeasible_slack_basis_lp(), vec![1, 2]).unwrap_err();
 
-        assert!(simplex.is_dual_feasible().unwrap());
+        assert_eq!(
+            error,
+            DualSimplexError::DualInfeasibleInitialBasis {
+                column: 0,
+                reduced_cost: -1.0,
+            }
+        );
     }
 
     #[test]
-    fn dual_revised_simplex_reports_dual_infeasibility() {
+    fn dual_revised_simplex_accepts_reduced_cost_within_tolerance() {
         let simplex =
-            DualRevisedSimplex::new(dual_infeasible_slack_basis_lp(), vec![1, 2]).unwrap();
+            DualRevisedSimplex::new(dual_feasible_primal_infeasible_lp(), vec![1, 2]).unwrap();
 
-        assert!(!simplex.is_dual_feasible().unwrap());
+        assert_eq!(
+            simplex.reduced_costs().unwrap(),
+            vec![PricedColumn {
+                column: 0,
+                reduced_cost: 1.0,
+            }]
+        );
     }
 
     #[test]
@@ -669,7 +704,13 @@ mod tests {
             array![1.0, 1.0],
             epsilon = 1.0e-9
         );
-        assert!(simplex.is_dual_feasible().unwrap());
+        assert!(
+            simplex
+                .reduced_costs()
+                .unwrap()
+                .iter()
+                .all(|priced_column| priced_column.reduced_cost >= -1.0e-9)
+        );
     }
 
     #[test]
