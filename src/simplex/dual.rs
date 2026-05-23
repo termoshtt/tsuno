@@ -68,6 +68,19 @@ pub enum Step {
 
 #[derive(Clone, Debug, PartialEq)]
 /// Outcome of repeatedly applying dual revised simplex steps.
+///
+/// A dual revised simplex solve assumes the initial basis is dual feasible.
+/// For the standard-form minimization problem, that means there exists a dual
+/// vector $y$ satisfying
+///
+/// $$
+/// A^T y \le c.
+/// $$
+///
+/// Therefore the primal objective is bounded below by $b^T y$ whenever the
+/// primal is feasible. Under this starting condition, the primal problem cannot
+/// be unbounded. The remaining terminal outcomes are optimality, primal
+/// infeasibility, or an iteration limit before either conclusion is proved.
 pub enum SolveResult {
     Optimal(SimplexSolution),
     IterationLimit(SimplexSolution),
