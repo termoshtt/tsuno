@@ -33,6 +33,9 @@ and provides the following pieces.
 - [x] Phase I auxiliary problem with artificial variables.
 - [x] `simplex::primal::solve` that runs Phase I and then Phase II.
 - [x] Structured simplex traces for solver paths and snapshot tests.
+- [x] Dual revised simplex step and solve loop for dual-feasible bases.
+- [x] Farkas certificates for infeasible standard-form LPs.
+- [x] Deletion-filter IIS construction for standard-form row subsystems.
 
 The LU update path currently uses eta updates. Forrest-Tomlin-style updates,
 stronger numerical pivoting, explicit refactorization, residual checks, and
@@ -122,12 +125,12 @@ is already infeasible. This is an analysis feature rather than just a solver
 status, so it needs enough modeling information to explain infeasibility back
 to the caller.
 
-- [ ] Decide whether the first IIS implementation targets only standard-form
-  rows or introduces a higher-level LP representation with inequalities,
-  equalities, and variable bounds.
+- [x] Implement a deletion-filter IIS algorithm for standard-form row
+  subsystems.
+- [x] Return standard-form row indices and a Farkas certificate for the row
+  subsystem.
+- [x] Use Farkas certificates as infeasibility witnesses.
 - [ ] Preserve mappings from a higher-level LP into standard form.
-- [ ] Use Farkas certificates as infeasibility witnesses.
-- [ ] Implement a deletion-filter style IIS extraction algorithm.
 - [ ] Return IIS results in terms of the caller-facing constraint identifiers.
 
 # License

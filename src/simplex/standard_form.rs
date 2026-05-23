@@ -125,6 +125,7 @@ pub enum StandardFormError {
     BasisDimensionMismatch { expected: usize, actual: usize },
     DualVariableLengthMismatch { expected: usize, actual: usize },
     FarkasMultiplierLengthMismatch { expected: usize, actual: usize },
+    RowOutOfBounds { row: usize, nrows: usize },
     ColumnOutOfBounds { column: usize, ncols: usize },
     Basis(BasisError),
 }
@@ -182,6 +183,22 @@ impl StandardFormLp {
 
     pub fn c(&self) -> &Array1<f64> {
         &self.c
+    }
+
+    pub(crate) fn row_subsystem(&self, rows: &[usize]) -> Result<Self, StandardFormError> {
+        let mut a = Array2::zeros((rows.len(), self.a.ncols()));
+        let mut b = Array1::zeros(rows.len());
+        for (target_row, &source_row) in rows.iter().enumerate() {
+            if source_row >= self.a.nrows() {
+                return Err(StandardFormError::RowOutOfBounds {
+                    row: source_row,
+                    nrows: self.a.nrows(),
+                });
+            }
+            a.row_mut(target_row).assign(&self.a.row(source_row));
+            b[target_row] = self.b[source_row];
+        }
+        Self::new(a, b, self.c.clone())
     }
 
     /// Return the `j`-th column of the constraint matrix.
