@@ -136,23 +136,23 @@ pub enum SolveResult {
 /// r_j = c_j - A_j^T y \quad (j \notin I).
 /// $$
 ///
-/// Primal simplex starts from a primal feasible basis, keeps
-/// $x_I \ge 0$, and repairs negative reduced costs. Dual simplex uses the
-/// opposite invariant: it starts from a dual feasible basis,
+/// Primal simplex starts from a primal feasible basis, keeps $x_I \ge 0$, and
+/// repairs negative reduced costs. Dual simplex uses the opposite invariant:
+/// it starts from a dual feasible basis and repairs negative basic primal
+/// values.
+///
+/// # Invariant
+///
+/// A value of this type has a dual-feasible basis:
 ///
 /// $$
 /// r_j \ge -\epsilon \quad (j \notin I),
 /// $$
 ///
-/// and then repairs negative basic primal values.
+/// The constructors reject a basis that violates this condition, using
+/// [`RevisedSimplexOptions::reduced_cost_tolerance`] as $\epsilon$.
 ///
-/// A value of this type has a dual-feasible basis as a type invariant:
-///
-/// $$
-/// r_j \ge -\epsilon \quad (j \notin I).
-/// $$
-///
-/// The constructors reject a basis that violates this condition.
+/// # Step
 ///
 /// One dual revised simplex step chooses a leaving basis position
 ///

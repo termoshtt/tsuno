@@ -128,22 +128,22 @@ pub fn solve(
 /// the [`StandardFormLp`] stores $A$, $b$, and $c$, while the [`Basis`] stores
 /// the current basis index set $I$ and an LU representation of $B = A_I$.
 ///
-/// A primal revised simplex step keeps the basic solution primal feasible,
+/// # Invariant
+///
+/// A value of this type has a primal-feasible basis:
 ///
 /// $$
-/// x_I = B^{-1} b \ge 0,
+/// x_I = B^{-1} b \ge -\epsilon.
 /// $$
 ///
-/// A value of this type has a primal-feasible basis as a type invariant:
+/// The constructors reject a basis that violates this condition, using
+/// [`RevisedSimplexOptions::pivot_tolerance`] as $\epsilon$.
 ///
-/// $$
-/// x_I \ge -\epsilon.
-/// $$
+/// # Step
 ///
-/// The constructors reject a basis that violates this condition.
-///
-/// and repairs a negative reduced cost. It first chooses a nonbasis column
-/// with the most negative reduced cost, computes
+/// A primal revised simplex step keeps this invariant and repairs a negative
+/// reduced cost. It first chooses a nonbasis column with the most negative
+/// reduced cost, computes
 ///
 /// $$
 /// d = B^{-1} A_q,
