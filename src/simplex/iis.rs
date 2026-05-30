@@ -59,14 +59,21 @@ impl FarkasCertificate {
             let mut candidate_rows = rows.clone();
             candidate_rows.remove(position);
 
-            match feasibility(self.lp(), &candidate_rows, options.clone())? {
-                Feasibility::Feasible => {
+            if candidate_rows.is_empty() {
+                position += 1;
+                continue;
+            }
+
+            match solve_row_subsystem(self.lp(), &candidate_rows, options.clone())? {
+                SimplexResult::Optimal(_)
+                | SimplexResult::IterationLimit(_)
+                | SimplexResult::Unbounded { .. } => {
                     position += 1;
                 }
-                Feasibility::Infeasible(_) => {
+                SimplexResult::Infeasible(_) => {
                     rows = candidate_rows;
                 }
-                Feasibility::IterationLimit => {
+                SimplexResult::PhaseOneIterationLimit(_) => {
                     return Err(IisError::IterationLimit {
                         rows: candidate_rows,
                     });
@@ -74,42 +81,32 @@ impl FarkasCertificate {
             }
         }
 
-        match feasibility(self.lp(), &rows, options)? {
-            Feasibility::Infeasible(certificate) => {
-                lift_certificate(self.lp(), &rows, certificate, certificate_tolerance)
+        match solve_row_subsystem(self.lp(), &rows, options)? {
+            SimplexResult::Infeasible(infeasible) => lift_certificate(
+                self.lp(),
+                &rows,
+                infeasible.certificate,
+                certificate_tolerance,
+            ),
+            SimplexResult::Optimal(_)
+            | SimplexResult::IterationLimit(_)
+            | SimplexResult::Unbounded { .. } => {
+                unreachable!("FarkasCertificate guarantees infeasibility")
             }
-            Feasibility::Feasible => unreachable!("FarkasCertificate guarantees infeasibility"),
-            Feasibility::IterationLimit => Err(IisError::IterationLimit { rows }),
+            SimplexResult::PhaseOneIterationLimit(_) => Err(IisError::IterationLimit { rows }),
         }
     }
 }
 
-enum Feasibility {
-    Feasible,
-    Infeasible(FarkasCertificate),
-    IterationLimit,
-}
-
-fn feasibility(
+fn solve_row_subsystem(
     lp: &StandardFormLp,
     rows: &[usize],
     options: RevisedSimplexOptions,
-) -> Result<Feasibility, IisError> {
-    if rows.is_empty() {
-        return Ok(Feasibility::Feasible);
-    }
-
+) -> Result<SimplexResult, IisError> {
+    debug_assert!(!rows.is_empty());
     let restricted_lp = lp.row_subsystem(rows)?;
     let mut trace = NoTrace;
-    match primal::solve(restricted_lp, options, &mut trace)? {
-        SimplexResult::Infeasible(infeasible) => {
-            Ok(Feasibility::Infeasible(infeasible.certificate))
-        }
-        SimplexResult::PhaseOneIterationLimit(_) => Ok(Feasibility::IterationLimit),
-        SimplexResult::Optimal(_)
-        | SimplexResult::IterationLimit(_)
-        | SimplexResult::Unbounded { .. } => Ok(Feasibility::Feasible),
-    }
+    Ok(primal::solve(restricted_lp, options, &mut trace)?)
 }
 
 fn lift_certificate(
