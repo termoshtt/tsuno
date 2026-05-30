@@ -54,6 +54,7 @@ impl FarkasCertificate {
     ) -> Result<FarkasCertificate, IisError> {
         let certificate_tolerance = options.pivot_tolerance;
         let mut rows: Vec<_> = (0..self.lp().a().nrows()).collect();
+        let mut reduced_certificate = None;
         let mut position = 0;
         while position < rows.len() {
             let mut candidate_rows = rows.clone();
@@ -70,8 +71,9 @@ impl FarkasCertificate {
                 | SimplexResult::Unbounded { .. } => {
                     position += 1;
                 }
-                SimplexResult::Infeasible(_) => {
+                SimplexResult::Infeasible(infeasible) => {
                     rows = candidate_rows;
+                    reduced_certificate = Some(infeasible.certificate);
                 }
                 SimplexResult::PhaseOneIterationLimit(_) => {
                     return Err(IisError::IterationLimit {
@@ -81,19 +83,10 @@ impl FarkasCertificate {
             }
         }
 
-        match solve_row_subsystem(self.lp(), &rows, options)? {
-            SimplexResult::Infeasible(infeasible) => lift_certificate(
-                self.lp(),
-                &rows,
-                infeasible.certificate,
-                certificate_tolerance,
-            ),
-            SimplexResult::Optimal(_)
-            | SimplexResult::IterationLimit(_)
-            | SimplexResult::Unbounded { .. } => {
-                unreachable!("FarkasCertificate guarantees infeasibility")
-            }
-            SimplexResult::PhaseOneIterationLimit(_) => Err(IisError::IterationLimit { rows }),
+        if let Some(certificate) = reduced_certificate {
+            lift_certificate(self.lp(), &rows, certificate, certificate_tolerance)
+        } else {
+            Ok(self.clone())
         }
     }
 }
