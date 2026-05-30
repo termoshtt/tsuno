@@ -1,7 +1,7 @@
 use crate::simplex::primal;
 use crate::simplex::{
-    FarkasCertificate, NoTrace, RevisedSimplexOptions, SimplexError, SimplexResult,
-    StandardFormError, StandardFormLp,
+    FarkasCertificate, FarkasVerification, NoTrace, RevisedSimplexOptions, SimplexError,
+    SimplexResult, StandardFormError, StandardFormLp,
 };
 
 #[katexit::katexit]
@@ -36,13 +36,13 @@ pub struct StandardFormIis {
 #[derive(Clone, Debug, PartialEq)]
 /// Result of searching for a standard-form row IIS.
 pub enum IisResult {
-    Feasible,
     Infeasible(StandardFormIis),
     IterationLimit { rows: Vec<usize> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum IisError {
+    InvalidCertificate(FarkasVerification),
     Problem(StandardFormError),
     Simplex(SimplexError),
 }
@@ -59,53 +59,65 @@ impl From<SimplexError> for IisError {
     }
 }
 
-/// Compute a standard-form row IIS with a deletion filter.
-///
-/// This first checks whether the full system is infeasible. If it is feasible,
-/// [`IisResult::Feasible`] is returned. Otherwise, starting from all rows, the
-/// deletion filter tries to remove each row. A row is deleted when the remaining
-/// subsystem is still infeasible; it is kept when deletion makes the subsystem
-/// feasible.
-///
-/// This is a correctness-first implementation. It repeatedly solves Phase I
-/// feasibility problems and does not try to reuse bases between row deletions.
-pub fn deletion_filter_iis(
-    lp: &StandardFormLp,
-    options: RevisedSimplexOptions,
-) -> Result<IisResult, IisError> {
-    let mut rows: Vec<_> = (0..lp.a().nrows()).collect();
-    match feasibility(lp, &rows, options.clone())? {
-        Feasibility::Feasible => return Ok(IisResult::Feasible),
-        Feasibility::Infeasible(_) => {}
-        Feasibility::IterationLimit => return Ok(IisResult::IterationLimit { rows }),
-    }
+impl FarkasCertificate {
+    #[katexit::katexit]
+    /// Refine this infeasibility certificate into a standard-form row IIS.
+    ///
+    /// This method treats IIS construction as an additional analysis performed
+    /// after infeasibility has already been proved. It first verifies this
+    /// certificate against `lp`; only then does it run a deletion filter over
+    /// the standard-form rows.
+    ///
+    /// For a valid certificate $y$ of
+    ///
+    /// $$
+    /// A x = b,\qquad x \ge 0,
+    /// $$
+    ///
+    /// the full row system is known to be infeasible because
+    /// $A^T y \ge 0$ and $b^T y < 0$. The deletion filter then removes a row
+    /// whenever the remaining row subsystem is still infeasible. The returned
+    /// certificate belongs to the final row subsystem, not necessarily to the
+    /// original full system.
+    pub fn deletion_filter_iis(
+        &self,
+        lp: &StandardFormLp,
+        options: RevisedSimplexOptions,
+        certificate_tolerance: f64,
+    ) -> Result<IisResult, IisError> {
+        let verification = self.verify(lp, certificate_tolerance)?;
+        if !verification.valid {
+            return Err(IisError::InvalidCertificate(verification));
+        }
 
-    let mut position = 0;
-    while position < rows.len() {
-        let mut candidate_rows = rows.clone();
-        candidate_rows.remove(position);
+        let mut rows: Vec<_> = (0..lp.a().nrows()).collect();
+        let mut position = 0;
+        while position < rows.len() {
+            let mut candidate_rows = rows.clone();
+            candidate_rows.remove(position);
 
-        match feasibility(lp, &candidate_rows, options.clone())? {
-            Feasibility::Feasible => {
-                position += 1;
-            }
-            Feasibility::Infeasible(_) => {
-                rows = candidate_rows;
-            }
-            Feasibility::IterationLimit => {
-                return Ok(IisResult::IterationLimit {
-                    rows: candidate_rows,
-                });
+            match feasibility(lp, &candidate_rows, options.clone())? {
+                Feasibility::Feasible => {
+                    position += 1;
+                }
+                Feasibility::Infeasible(_) => {
+                    rows = candidate_rows;
+                }
+                Feasibility::IterationLimit => {
+                    return Ok(IisResult::IterationLimit {
+                        rows: candidate_rows,
+                    });
+                }
             }
         }
-    }
 
-    match feasibility(lp, &rows, options)? {
-        Feasibility::Infeasible(certificate) => {
-            Ok(IisResult::Infeasible(StandardFormIis { rows, certificate }))
+        match feasibility(lp, &rows, options)? {
+            Feasibility::Infeasible(certificate) => {
+                Ok(IisResult::Infeasible(StandardFormIis { rows, certificate }))
+            }
+            Feasibility::Feasible => Err(IisError::InvalidCertificate(verification)),
+            Feasibility::IterationLimit => Ok(IisResult::IterationLimit { rows }),
         }
-        Feasibility::Feasible => Ok(IisResult::Feasible),
-        Feasibility::IterationLimit => Ok(IisResult::IterationLimit { rows }),
     }
 }
 
@@ -145,17 +157,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deletion_filter_iis_returns_feasible_for_feasible_lp() {
+    fn deletion_filter_iis_rejects_invalid_certificate() {
         let lp = StandardFormLp::new(
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
             array![1.0, 2.0],
             array![0.0, 0.0, 0.0, 0.0],
         )
         .unwrap();
+        let certificate = FarkasCertificate {
+            multiplier: array![0.0, 0.0],
+        };
 
-        let result = deletion_filter_iis(&lp, RevisedSimplexOptions::default()).unwrap();
+        let error = certificate
+            .deletion_filter_iis(&lp, RevisedSimplexOptions::default(), 1.0e-9)
+            .unwrap_err();
 
-        assert_eq!(result, IisResult::Feasible);
+        let IisError::InvalidCertificate(verification) = error else {
+            panic!("expected an invalid certificate error");
+        };
+        assert!(!verification.valid);
     }
 
     #[test]
@@ -166,8 +186,13 @@ mod tests {
             array![0.0, 0.0, 0.0],
         )
         .unwrap();
+        let certificate = FarkasCertificate {
+            multiplier: array![1.0, -1.0, 0.0],
+        };
 
-        let result = deletion_filter_iis(&lp, RevisedSimplexOptions::default()).unwrap();
+        let result = certificate
+            .deletion_filter_iis(&lp, RevisedSimplexOptions::default(), 1.0e-9)
+            .unwrap();
 
         let IisResult::Infeasible(iis) = result else {
             panic!("expected an IIS");
@@ -189,8 +214,13 @@ mod tests {
             array![0.0, 0.0],
         )
         .unwrap();
+        let certificate = FarkasCertificate {
+            multiplier: array![1.0, -1.0],
+        };
 
-        let result = deletion_filter_iis(&lp, RevisedSimplexOptions::default()).unwrap();
+        let result = certificate
+            .deletion_filter_iis(&lp, RevisedSimplexOptions::default(), 1.0e-9)
+            .unwrap();
 
         let IisResult::Infeasible(iis) = result else {
             panic!("expected an IIS");

@@ -35,7 +35,8 @@ and provides the following pieces.
 - [x] Structured simplex traces for solver paths and snapshot tests.
 - [x] Dual revised simplex step and solve loop for dual-feasible bases.
 - [x] Farkas certificates for infeasible standard-form LPs.
-- [x] Deletion-filter IIS construction for standard-form row subsystems.
+- [x] Farkas-certificate-driven deletion-filter IIS construction for
+  standard-form row subsystems.
 
 The LU update path currently uses eta updates. Forrest-Tomlin-style updates,
 stronger numerical pivoting, explicit refactorization, residual checks, and
@@ -130,6 +131,8 @@ to the caller.
 - [x] Return standard-form row indices and a Farkas certificate for the row
   subsystem.
 - [x] Use Farkas certificates as infeasibility witnesses.
+- [x] Expose IIS construction as additional analysis from a Farkas certificate,
+  rather than as a direct operation on arbitrary LPs.
 - [ ] Preserve mappings from a higher-level LP into standard form.
 - [ ] Return IIS results in terms of the caller-facing constraint identifiers.
 
