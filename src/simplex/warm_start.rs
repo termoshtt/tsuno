@@ -1,6 +1,8 @@
 use crate::simplex::dual::{DualRevisedSimplex, DualSimplexError};
-use crate::simplex::primal::{PrimalSimplexError, RevisedSimplex};
-use crate::simplex::{RevisedSimplexOptions, StandardFormLp};
+use crate::simplex::primal::{PrimalSimplexError, RevisedSimplex, primal_infeasible_basic_value};
+use crate::simplex::{
+    RevisedSimplexOptions, RevisedSimplexState, StandardFormError, StandardFormLp,
+};
 
 #[derive(Debug)]
 /// Solver state selected for warm-start reoptimization.
@@ -19,6 +21,7 @@ pub enum WarmStart {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WarmStartError {
+    Problem(StandardFormError),
     NoReusableBasis {
         primal: PrimalSimplexError,
         dual: DualSimplexError,
@@ -54,12 +57,22 @@ pub fn warm_start(
     basis_indices: Vec<usize>,
     options: RevisedSimplexOptions,
 ) -> Result<WarmStart, WarmStartError> {
-    match RevisedSimplex::new(lp.clone(), basis_indices.clone(), options.clone()) {
-        Ok(simplex) => Ok(WarmStart::Primal(simplex)),
-        Err(primal) => match DualRevisedSimplex::new(lp, basis_indices, options) {
+    let state =
+        RevisedSimplexState::new(lp, basis_indices, options).map_err(WarmStartError::Problem)?;
+
+    if let Some((position, value)) =
+        primal_infeasible_basic_value(state.lp(), state.basis(), state.options().pivot_tolerance)
+            .map_err(WarmStartError::Problem)?
+    {
+        let primal = PrimalSimplexError::PrimalInfeasibleInitialBasis { position, value };
+        match DualRevisedSimplex::from_state(state) {
             Ok(simplex) => Ok(WarmStart::Dual(simplex)),
             Err(dual) => Err(WarmStartError::NoReusableBasis { primal, dual }),
-        },
+        }
+    } else {
+        Ok(WarmStart::Primal(
+            RevisedSimplex::from_state(state).expect("state was already checked primal feasible"),
+        ))
     }
 }
 
@@ -106,9 +119,9 @@ mod tests {
     #[test]
     fn warm_start_reports_basis_that_cannot_be_reused() {
         let lp = StandardFormLp::new(
-            array![[1.0, 0.0], [0.0, 1.0]],
-            array![1.0, 2.0],
-            array![0.0, 0.0],
+            array![[1.0, 0.0]],
+            array![-1.0],
+            array![0.0, -1.0],
         )
         .unwrap();
 

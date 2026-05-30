@@ -3,7 +3,9 @@ use ndarray::Array1;
 use super::{
     RevisedSimplexOptions, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTraceStep,
 };
-use crate::simplex::{Basis, FarkasCertificate, PricedColumn, StandardFormError, StandardFormLp};
+use crate::simplex::{
+    Basis, FarkasCertificate, PricedColumn, RevisedSimplexState, StandardFormError, StandardFormLp,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 #[katexit::katexit]
@@ -180,9 +182,7 @@ pub enum SolveResult {
 /// column, the dual feasible dictionary proves primal infeasibility for the
 /// current standard-form LP.
 pub struct DualRevisedSimplex {
-    lp: StandardFormLp,
-    basis: Basis,
-    options: RevisedSimplexOptions,
+    state: RevisedSimplexState,
 }
 
 impl DualRevisedSimplex {
@@ -191,28 +191,38 @@ impl DualRevisedSimplex {
         basis_indices: Vec<usize>,
         options: RevisedSimplexOptions,
     ) -> Result<Self, DualSimplexError> {
-        let basis = lp.basis(basis_indices)?;
-        if let Some(priced_column) =
-            dual_infeasible_column(&lp, &basis, options.reduced_cost_tolerance)?
-        {
+        let state = RevisedSimplexState::new(lp, basis_indices, options)?;
+        Self::from_state(state)
+    }
+
+    pub fn from_state(state: RevisedSimplexState) -> Result<Self, DualSimplexError> {
+        if let Some(priced_column) = dual_infeasible_column(
+            state.lp(),
+            state.basis(),
+            state.options().reduced_cost_tolerance,
+        )? {
             return Err(DualSimplexError::DualInfeasibleInitialBasis {
                 column: priced_column.column,
                 reduced_cost: priced_column.reduced_cost,
             });
         }
-        Ok(Self { lp, basis, options })
+        Ok(Self { state })
     }
 
     pub fn lp(&self) -> &StandardFormLp {
-        &self.lp
+        self.state.lp()
     }
 
     pub fn basis(&self) -> &Basis {
-        &self.basis
+        self.state.basis()
     }
 
     pub fn options(&self) -> &RevisedSimplexOptions {
-        &self.options
+        self.state.options()
+    }
+
+    pub fn into_state(self) -> RevisedSimplexState {
+        self.state
     }
 
     /// Compute the current basic primal values.
@@ -222,7 +232,7 @@ impl DualRevisedSimplex {
     /// later dual pivot step will choose a negative component as the leaving
     /// basis position.
     pub fn basic_solution(&self) -> Result<Array1<f64>, StandardFormError> {
-        self.lp.basic_solution(&self.basis)
+        self.state.basic_solution()
     }
 
     /// Compute the dual variables for the current basis.
@@ -230,7 +240,7 @@ impl DualRevisedSimplex {
     /// This solves $B^T y = c_I$, equivalently $y = B^{-T} c_I$. The resulting
     /// $y$ defines reduced costs $r_j = c_j - A_j^T y$ for nonbasis columns.
     pub fn dual_variables(&self) -> Result<Array1<f64>, StandardFormError> {
-        self.lp.dual_variables(&self.basis)
+        self.state.dual_variables()
     }
 
     /// Compute reduced costs for all current nonbasis columns.
@@ -239,7 +249,7 @@ impl DualRevisedSimplex {
     /// returned reduced cost satisfies $r_j \ge -\epsilon$, where $\epsilon$ is
     /// [`RevisedSimplexOptions::reduced_cost_tolerance`].
     pub fn reduced_costs(&self) -> Result<Vec<PricedColumn>, StandardFormError> {
-        self.lp.reduced_costs(&self.basis)
+        self.state.reduced_costs()
     }
 
     /// Select the most infeasible basic variable.
@@ -268,7 +278,7 @@ impl DualRevisedSimplex {
         let basic_solution = self.basic_solution()?;
         Ok(most_infeasible_basic_variable(
             &basic_solution,
-            self.options.pivot_tolerance,
+            self.options().pivot_tolerance,
         ))
     }
 
@@ -296,7 +306,7 @@ impl DualRevisedSimplex {
         leaving: &LeavingBasicVariable,
     ) -> Result<Array1<f64>, StandardFormError> {
         let row_multiplier = self.infeasibility_multiplier(leaving);
-        Ok(self.lp.a().t().dot(&row_multiplier))
+        Ok(self.lp().a().t().dot(&row_multiplier))
     }
 
     /// Build the Farkas multiplier associated with a dual infeasible row.
@@ -318,9 +328,7 @@ impl DualRevisedSimplex {
     /// this $u$ is a Farkas certificate for infeasibility of
     /// $Ax=b,\ x\ge 0$.
     fn infeasibility_multiplier(&self, leaving: &LeavingBasicVariable) -> Array1<f64> {
-        let mut unit = Array1::zeros(self.lp.a().nrows());
-        unit[leaving.position] = 1.0;
-        self.basis.solve_transposed(&unit)
+        self.state.solve_transposed_basis_unit(leaving.position)
     }
 
     fn infeasibility_certificate(
@@ -328,9 +336,9 @@ impl DualRevisedSimplex {
         leaving: &LeavingBasicVariable,
     ) -> Result<FarkasCertificate, StandardFormError> {
         FarkasCertificate::new(
-            self.lp.clone(),
+            self.lp().clone(),
             self.infeasibility_multiplier(leaving),
-            self.options.pivot_tolerance,
+            self.options().pivot_tolerance,
         )
     }
 
@@ -360,7 +368,7 @@ impl DualRevisedSimplex {
         Ok(dual_minimum_ratio_test(
             self.reduced_costs()?,
             pivot_row,
-            self.options.pivot_tolerance,
+            self.options().pivot_tolerance,
         ))
     }
 
@@ -382,10 +390,8 @@ impl DualRevisedSimplex {
             return Ok(Step::Infeasible { leaving, pivot_row });
         };
 
-        let entering_column = self.lp.column(entering.column)?.to_owned();
-        self.basis
-            .replace_column(leaving.position, entering.column, &entering_column)
-            .map_err(StandardFormError::Basis)?;
+        self.state
+            .replace_basis_column(leaving.position, entering.column)?;
 
         Ok(Step::Pivoted {
             leaving,
@@ -418,18 +424,20 @@ impl DualRevisedSimplex {
         &mut self,
         trace: &mut impl SimplexTrace,
     ) -> Result<SolveResult, StandardFormError> {
-        for iteration in 0..self.options.max_iterations {
-            trace.step_started(iteration, self.basis.indices());
+        for iteration in 0..self.options().max_iterations {
+            trace.step_started(iteration, self.basis().indices());
             let step = self.step()?;
             trace.step_completed(SimplexTraceEvent {
                 iteration,
                 step: SimplexTraceStep::Dual(&step),
-                basis_after: self.basis.indices(),
+                basis_after: self.basis().indices(),
             });
 
             match step {
                 Step::Optimal => {
-                    return Ok(SolveResult::Optimal(self.current_solution(iteration)?));
+                    return Ok(SolveResult::Optimal(
+                        self.state.current_solution(iteration)?,
+                    ));
                 }
                 Step::Infeasible { leaving, pivot_row } => {
                     let certificate = self.infeasibility_certificate(&leaving)?;
@@ -445,35 +453,9 @@ impl DualRevisedSimplex {
         }
 
         Ok(SolveResult::IterationLimit(
-            self.current_solution(self.options.max_iterations)?,
+            self.state.current_solution(self.options().max_iterations)?,
         ))
     }
-
-    fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
-        let basic_solution = self.basic_solution()?;
-        let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
-        let dual = self.dual_variables()?;
-        let objective_value = self.lp.c().dot(&primal);
-        Ok(SimplexSolution {
-            primal,
-            dual,
-            objective_value,
-            basis_indices: self.basis.indices().to_vec(),
-            iterations,
-        })
-    }
-}
-
-fn full_primal_solution(
-    dimension: usize,
-    basis_indices: &[usize],
-    basic_solution: &Array1<f64>,
-) -> Array1<f64> {
-    let mut primal = Array1::zeros(dimension);
-    for (&column, &value) in basis_indices.iter().zip(basic_solution.iter()) {
-        primal[column] = value;
-    }
-    primal
 }
 
 fn dual_infeasible_column(
