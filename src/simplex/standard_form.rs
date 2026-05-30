@@ -117,25 +117,44 @@ pub struct FarkasCertificate {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-/// Numerical verification summary for a [`FarkasCertificate`].
-pub struct FarkasVerification {
-    pub minimum_column_value: f64,
-    pub rhs_value: f64,
-    pub valid: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub enum StandardFormError {
     EmptyProblem,
-    TooFewColumns { nrows: usize, ncols: usize },
-    RightHandSideLengthMismatch { expected: usize, actual: usize },
-    CostLengthMismatch { expected: usize, actual: usize },
-    BasisDimensionMismatch { expected: usize, actual: usize },
-    DualVariableLengthMismatch { expected: usize, actual: usize },
-    FarkasMultiplierLengthMismatch { expected: usize, actual: usize },
-    InvalidFarkasCertificate(FarkasVerification),
-    RowOutOfBounds { row: usize, nrows: usize },
-    ColumnOutOfBounds { column: usize, ncols: usize },
+    TooFewColumns {
+        nrows: usize,
+        ncols: usize,
+    },
+    RightHandSideLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    CostLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    BasisDimensionMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    DualVariableLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    FarkasMultiplierLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    InvalidFarkasCertificate {
+        minimum_column_value: f64,
+        rhs_value: f64,
+    },
+    RowOutOfBounds {
+        row: usize,
+        nrows: usize,
+    },
+    ColumnOutOfBounds {
+        column: usize,
+        ncols: usize,
+    },
     Basis(BasisError),
 }
 
@@ -156,9 +175,13 @@ impl FarkasCertificate {
         multiplier: Array1<f64>,
         tolerance: f64,
     ) -> Result<Self, StandardFormError> {
-        let verification = verify_farkas_multiplier(&lp, &multiplier, tolerance)?;
-        if !verification.valid {
-            return Err(StandardFormError::InvalidFarkasCertificate(verification));
+        let values = farkas_certificate_values(&lp, &multiplier)?;
+        let tolerance = tolerance.max(0.0);
+        if values.minimum_column_value < -tolerance || values.rhs_value >= -tolerance {
+            return Err(StandardFormError::InvalidFarkasCertificate {
+                minimum_column_value: values.minimum_column_value,
+                rhs_value: values.rhs_value,
+            });
         }
         Ok(Self { lp, multiplier })
     }
@@ -171,26 +194,17 @@ impl FarkasCertificate {
     pub fn multiplier(&self) -> &Array1<f64> {
         &self.multiplier
     }
-
-    /// Verify the certificate against its stored standard-form LP.
-    ///
-    /// This computes $\min_j (A^T y)_j$ and $b^T y$. The certificate is treated
-    /// as valid when
-    ///
-    /// $$
-    /// \min_j (A^T y)_j \ge -\epsilon,\qquad b^T y < -\epsilon.
-    /// $$
-    pub fn verify(&self, tolerance: f64) -> FarkasVerification {
-        verify_farkas_multiplier(&self.lp, &self.multiplier, tolerance)
-            .expect("FarkasCertificate preserves multiplier dimension")
-    }
 }
 
-fn verify_farkas_multiplier(
+struct FarkasCertificateValues {
+    minimum_column_value: f64,
+    rhs_value: f64,
+}
+
+fn farkas_certificate_values(
     lp: &StandardFormLp,
     multiplier: &Array1<f64>,
-    tolerance: f64,
-) -> Result<FarkasVerification, StandardFormError> {
+) -> Result<FarkasCertificateValues, StandardFormError> {
     if multiplier.len() != lp.a.nrows() {
         return Err(StandardFormError::FarkasMultiplierLengthMismatch {
             expected: lp.a.nrows(),
@@ -198,7 +212,6 @@ fn verify_farkas_multiplier(
         });
     }
 
-    let tolerance = tolerance.max(0.0);
     let column_values = lp.a.t().dot(multiplier);
     let minimum_column_value = column_values
         .iter()
@@ -206,10 +219,9 @@ fn verify_farkas_multiplier(
         .min_by(f64::total_cmp)
         .unwrap();
     let rhs_value = lp.b.dot(multiplier);
-    Ok(FarkasVerification {
+    Ok(FarkasCertificateValues {
         minimum_column_value,
         rhs_value,
-        valid: minimum_column_value >= -tolerance && rhs_value < -tolerance,
     })
 }
 
@@ -547,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn farkas_certificate_verifies_standard_form_infeasibility() {
+    fn farkas_certificate_constructs_verified_standard_form_infeasibility_certificate() {
         let lp = StandardFormLp::new(
             array![[1.0, 0.0], [1.0, 0.0]],
             array![1.0, 2.0],
@@ -558,11 +570,6 @@ mod tests {
 
         assert_eq!(certificate.lp(), &lp);
         assert_abs_diff_eq!(certificate.multiplier(), &array![1.0, -1.0]);
-        let verification = certificate.verify(1.0e-9);
-
-        assert_abs_diff_eq!(verification.minimum_column_value, 0.0, epsilon = 1.0e-9);
-        assert_abs_diff_eq!(verification.rhs_value, -1.0, epsilon = 1.0e-9);
-        assert!(verification.valid);
     }
 
     #[test]

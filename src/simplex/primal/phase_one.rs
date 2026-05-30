@@ -370,11 +370,15 @@ mod tests {
             SimplexResult::Infeasible(infeasible) => {
                 assert_abs_diff_eq!(infeasible.objective_value, 1.0, epsilon = 1.0e-9);
                 assert_eq!(infeasible.certificate.lp(), &lp);
-                let verification = infeasible.certificate.verify(1.0e-9);
-                assert!(
-                    verification.valid,
-                    "expected valid certificate, got {verification:?}"
-                );
+                let column_values = lp.a().t().dot(infeasible.certificate.multiplier());
+                let minimum_column_value = column_values
+                    .iter()
+                    .copied()
+                    .min_by(f64::total_cmp)
+                    .unwrap();
+                let rhs_value = lp.b().dot(infeasible.certificate.multiplier());
+                assert!(minimum_column_value >= -1.0e-9);
+                assert!(rhs_value < -1.0e-9);
             }
             _ => panic!("expected infeasible result"),
         }
@@ -391,13 +395,15 @@ mod tests {
         match result {
             SimplexResult::Infeasible(infeasible) => {
                 assert_eq!(infeasible.certificate.lp(), &lp);
-                let verification = infeasible.certificate.verify(1.0e-9);
-                assert!(
-                    verification.valid,
-                    "expected valid certificate, got {verification:?}"
-                );
-                assert!(verification.minimum_column_value >= -1.0e-9);
-                assert!(verification.rhs_value < -1.0e-9);
+                let column_values = lp.a().t().dot(infeasible.certificate.multiplier());
+                let minimum_column_value = column_values
+                    .iter()
+                    .copied()
+                    .min_by(f64::total_cmp)
+                    .unwrap();
+                let rhs_value = lp.b().dot(infeasible.certificate.multiplier());
+                assert!(minimum_column_value >= -1.0e-9);
+                assert!(rhs_value < -1.0e-9);
             }
             _ => panic!("expected infeasible result"),
         }

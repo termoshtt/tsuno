@@ -887,11 +887,15 @@ mod tests {
                 );
                 assert_abs_diff_eq!(pivot_row, array![1.0, 1.0, 0.0], epsilon = 1.0e-9);
                 assert_eq!(certificate.lp(), simplex.lp());
-                let verification = certificate.verify(1.0e-9);
-                assert!(
-                    verification.valid,
-                    "expected valid certificate, got {verification:?}"
-                );
+                let column_values = simplex.lp().a().t().dot(certificate.multiplier());
+                let minimum_column_value = column_values
+                    .iter()
+                    .copied()
+                    .min_by(f64::total_cmp)
+                    .unwrap();
+                let rhs_value = simplex.lp().b().dot(certificate.multiplier());
+                assert!(minimum_column_value >= -1.0e-9);
+                assert!(rhs_value < -1.0e-9);
                 assert_eq!(iterations, 0);
             }
             _ => panic!("expected a dual simplex infeasible result"),
