@@ -1,6 +1,7 @@
 use ndarray::Array1;
 
-use super::{PricedColumn, StandardFormError};
+use super::{FarkasCertificate, PricedColumn, StandardFormError};
+use crate::simplex::dual::SolveResult as DualSolveResult;
 use crate::simplex::primal::{
     PhaseOneError, PhaseOneInfeasible, PhaseOneIterationLimit, PrimalSimplexError, SolveResult,
 };
@@ -61,18 +62,41 @@ pub struct SimplexSolution {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Infeasibility certificate returned by a simplex solve.
+///
+/// The certificate always proves infeasibility of the primal standard-form
+/// system. If infeasibility was found through Phase I, the auxiliary optimum is
+/// stored in `phase_one_objective_value`. If infeasibility was found by dual
+/// simplex during reoptimization, this field is `None`.
+pub struct SimplexInfeasible {
+    pub certificate: FarkasCertificate,
+    pub iterations: usize,
+    pub phase_one_objective_value: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 /// Outcome of solving a standard-form LP from an automatically constructed
 /// initial basis.
 pub enum SimplexResult {
     Optimal(SimplexSolution),
     IterationLimit(SimplexSolution),
     PhaseOneIterationLimit(PhaseOneIterationLimit),
-    Infeasible(PhaseOneInfeasible),
+    Infeasible(SimplexInfeasible),
     Unbounded {
         entering: PricedColumn,
         direction: Array1<f64>,
         iterations: usize,
     },
+}
+
+impl From<PhaseOneInfeasible> for SimplexInfeasible {
+    fn from(infeasible: PhaseOneInfeasible) -> Self {
+        Self {
+            certificate: infeasible.certificate,
+            iterations: infeasible.iterations,
+            phase_one_objective_value: Some(infeasible.objective_value),
+        }
+    }
 }
 
 impl From<SolveResult> for SimplexResult {
@@ -89,6 +113,24 @@ impl From<SolveResult> for SimplexResult {
                 direction,
                 iterations,
             },
+        }
+    }
+}
+
+impl From<DualSolveResult> for SimplexResult {
+    fn from(result: DualSolveResult) -> Self {
+        match result {
+            DualSolveResult::Optimal(solution) => SimplexResult::Optimal(solution),
+            DualSolveResult::IterationLimit(solution) => SimplexResult::IterationLimit(solution),
+            DualSolveResult::Infeasible {
+                certificate,
+                iterations,
+                ..
+            } => SimplexResult::Infeasible(SimplexInfeasible {
+                certificate,
+                iterations,
+                phase_one_objective_value: None,
+            }),
         }
     }
 }

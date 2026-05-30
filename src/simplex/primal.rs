@@ -1,12 +1,11 @@
 use ndarray::Array1;
 
 use super::revised_simplex::{
-    RevisedSimplexOptions, SimplexError, SimplexResult, SimplexSolution, SimplexTrace,
-    SimplexTraceEvent, SimplexTracePhase, SimplexTraceStep,
+    RevisedSimplexOptions, SimplexError, SimplexInfeasible, SimplexResult, SimplexSolution,
+    SimplexTrace, SimplexTraceEvent, SimplexTracePhase, SimplexTraceStep,
 };
 use super::{
     Basis, PricedColumn, RevisedSimplexState, SolvedSimplex, StandardFormError, StandardFormLp,
-    WarmStartResult,
 };
 
 mod phase_one;
@@ -78,8 +77,7 @@ pub enum SolveResult {
 /// simplex state when Phase II is reached.
 pub enum ReusableSolveResult {
     Solved(SolvedSimplex),
-    PhaseOneIterationLimit(PhaseOneIterationLimit),
-    Infeasible(PhaseOneInfeasible),
+    NotReusable(SimplexResult),
 }
 
 #[katexit::katexit]
@@ -120,7 +118,9 @@ pub fn solve(
             trace.phase_started(SimplexTracePhase::PhaseTwo);
             simplex.solve(trace).map(SimplexResult::from)
         }
-        PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(infeasible)),
+        PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(
+            SimplexInfeasible::from(infeasible),
+        )),
         PhaseOneResult::IterationLimit(limit) => Ok(SimplexResult::PhaseOneIterationLimit(limit)),
     }
 }
@@ -147,13 +147,15 @@ pub fn solve_reusable(
             let state = simplex.into_state();
             Ok(ReusableSolveResult::Solved(SolvedSimplex::new(
                 state,
-                WarmStartResult::from(result),
+                SimplexResult::from(result),
             )))
         }
-        PhaseOneResult::Infeasible(infeasible) => Ok(ReusableSolveResult::Infeasible(infeasible)),
-        PhaseOneResult::IterationLimit(limit) => {
-            Ok(ReusableSolveResult::PhaseOneIterationLimit(limit))
-        }
+        PhaseOneResult::Infeasible(infeasible) => Ok(ReusableSolveResult::NotReusable(
+            SimplexResult::Infeasible(SimplexInfeasible::from(infeasible)),
+        )),
+        PhaseOneResult::IterationLimit(limit) => Ok(ReusableSolveResult::NotReusable(
+            SimplexResult::PhaseOneIterationLimit(limit),
+        )),
     }
 }
 

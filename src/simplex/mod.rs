@@ -11,8 +11,8 @@ pub use basis::*;
 pub use iis::*;
 pub use revised_simplex::{
     FullTrace, FullTraceOutcome, FullTraceStep, NoTrace, RevisedSimplexOptions, SimplexError,
-    SimplexResult, SimplexSolution, SimplexTrace, SimplexTraceEvent, SimplexTracePhase,
-    SimplexTraceStep,
+    SimplexInfeasible, SimplexResult, SimplexSolution, SimplexTrace, SimplexTraceEvent,
+    SimplexTracePhase, SimplexTraceStep,
 };
 pub use standard_form::*;
 pub use state::*;

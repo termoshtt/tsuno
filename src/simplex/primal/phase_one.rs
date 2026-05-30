@@ -363,7 +363,11 @@ mod tests {
 
         match result {
             SimplexResult::Infeasible(infeasible) => {
-                assert_abs_diff_eq!(infeasible.objective_value, 1.0, epsilon = 1.0e-9);
+                assert_abs_diff_eq!(
+                    infeasible.phase_one_objective_value.unwrap(),
+                    1.0,
+                    epsilon = 1.0e-9
+                );
                 assert_eq!(infeasible.certificate.lp(), &lp);
                 let column_values = lp.a().t().dot(infeasible.certificate.multiplier());
                 let minimum_column_value = column_values
@@ -390,6 +394,7 @@ mod tests {
         match result {
             SimplexResult::Infeasible(infeasible) => {
                 assert_eq!(infeasible.certificate.lp(), &lp);
+                assert_eq!(infeasible.phase_one_objective_value, Some(1.0));
                 let column_values = lp.a().t().dot(infeasible.certificate.multiplier());
                 let minimum_column_value = column_values
                     .iter()

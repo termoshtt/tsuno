@@ -1,15 +1,10 @@
 use ndarray::Array1;
 
-use crate::simplex::dual::{
-    DualRevisedSimplex, DualSimplexError, LeavingBasicVariable, SolveResult as DualSolveResult,
-};
-use crate::simplex::primal::{
-    PrimalSimplexError, RevisedSimplex, SolveResult as PrimalSolveResult,
-    primal_infeasible_basic_value,
-};
+use crate::simplex::dual::{DualRevisedSimplex, DualSimplexError};
+use crate::simplex::primal::{PrimalSimplexError, RevisedSimplex, primal_infeasible_basic_value};
 use crate::simplex::{
-    FarkasCertificate, PricedColumn, RevisedSimplexOptions, RevisedSimplexState, SimplexError,
-    SimplexSolution, SimplexTrace, StandardFormError, StandardFormLp,
+    RevisedSimplexOptions, RevisedSimplexState, SimplexError, SimplexResult, SimplexTrace,
+    StandardFormError, StandardFormLp,
 };
 
 #[derive(Debug)]
@@ -36,40 +31,7 @@ pub enum WarmStart {
 /// [`RevisedSimplexState`] whose primal or dual invariant is unknown.
 pub struct SolvedSimplex {
     state: RevisedSimplexState,
-    result: WarmStartResult,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[katexit::katexit]
-/// Outcome of solving a warm-started standard-form LP.
-///
-/// Warm start chooses either primal or dual revised simplex from the reused
-/// basis invariant and then delegates to that solver. Therefore this result is
-/// the union of the terminal outcomes reachable from those already existing
-/// solve loops:
-///
-/// - primal revised simplex can prove optimality, hit an iteration limit, or
-///   prove primal unboundedness;
-/// - dual revised simplex can prove optimality, hit an iteration limit, or
-///   prove primal infeasibility with a Farkas certificate.
-///
-/// No Phase I outcome appears here because the caller has already supplied a
-/// reusable basis.
-pub enum WarmStartResult {
-    Optimal(SimplexSolution),
-    IterationLimit(SimplexSolution),
-    /// The primal standard-form LP is infeasible.
-    Infeasible {
-        leaving: LeavingBasicVariable,
-        pivot_row: Array1<f64>,
-        certificate: FarkasCertificate,
-        iterations: usize,
-    },
-    Unbounded {
-        entering: PricedColumn,
-        direction: Array1<f64>,
-        iterations: usize,
-    },
+    result: SimplexResult,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,53 +58,13 @@ impl From<StandardFormError> for ReoptimizationError {
     }
 }
 
-impl From<PrimalSolveResult> for WarmStartResult {
-    fn from(result: PrimalSolveResult) -> Self {
-        match result {
-            PrimalSolveResult::Optimal(solution) => WarmStartResult::Optimal(solution),
-            PrimalSolveResult::IterationLimit(solution) => {
-                WarmStartResult::IterationLimit(solution)
-            }
-            PrimalSolveResult::Unbounded {
-                entering,
-                direction,
-                iterations,
-            } => WarmStartResult::Unbounded {
-                entering,
-                direction,
-                iterations,
-            },
-        }
-    }
-}
-
-impl From<DualSolveResult> for WarmStartResult {
-    fn from(result: DualSolveResult) -> Self {
-        match result {
-            DualSolveResult::Optimal(solution) => WarmStartResult::Optimal(solution),
-            DualSolveResult::IterationLimit(solution) => WarmStartResult::IterationLimit(solution),
-            DualSolveResult::Infeasible {
-                leaving,
-                pivot_row,
-                certificate,
-                iterations,
-            } => WarmStartResult::Infeasible {
-                leaving,
-                pivot_row,
-                certificate,
-                iterations,
-            },
-        }
-    }
-}
-
 impl SolvedSimplex {
-    pub(crate) fn new(state: RevisedSimplexState, result: WarmStartResult) -> Self {
+    pub(crate) fn new(state: RevisedSimplexState, result: SimplexResult) -> Self {
         Self { state, result }
     }
 
     /// Return the terminal result associated with the reusable state.
-    pub fn result(&self) -> &WarmStartResult {
+    pub fn result(&self) -> &SimplexResult {
         &self.result
     }
 
@@ -185,15 +107,12 @@ impl WarmStart {
     /// This method does not introduce a separate warm-start algorithm. It calls
     /// primal revised simplex when the reused basis is primal feasible and dual
     /// revised simplex when the reused basis is only dual feasible.
-    pub fn solve(
-        &mut self,
-        trace: &mut impl SimplexTrace,
-    ) -> Result<WarmStartResult, SimplexError> {
+    pub fn solve(&mut self, trace: &mut impl SimplexTrace) -> Result<SimplexResult, SimplexError> {
         match self {
-            WarmStart::Primal(simplex) => simplex.solve(trace).map(WarmStartResult::from),
+            WarmStart::Primal(simplex) => simplex.solve(trace).map(SimplexResult::from),
             WarmStart::Dual(simplex) => simplex
                 .solve(trace)
-                .map(WarmStartResult::from)
+                .map(SimplexResult::from)
                 .map_err(SimplexError::from),
         }
     }
@@ -207,12 +126,12 @@ impl WarmStart {
             WarmStart::Primal(mut simplex) => {
                 let result = simplex.solve(trace)?;
                 let state = simplex.into_state();
-                Ok(SolvedSimplex::new(state, WarmStartResult::from(result)))
+                Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
             }
             WarmStart::Dual(mut simplex) => {
                 let result = simplex.solve(trace)?;
                 let state = simplex.into_state();
-                Ok(SolvedSimplex::new(state, WarmStartResult::from(result)))
+                Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
             }
         }
     }
@@ -345,7 +264,7 @@ mod tests {
 
         let result = start.solve(&mut trace).unwrap();
 
-        let WarmStartResult::Optimal(solution) = result else {
+        let SimplexResult::Optimal(solution) = result else {
             panic!("expected optimal warm-start result");
         };
         assert_eq!(solution.basis_indices, vec![0, 1]);
@@ -366,18 +285,12 @@ mod tests {
 
         let result = start.solve(&mut trace).unwrap();
 
-        let WarmStartResult::Infeasible {
-            leaving,
-            certificate,
-            iterations,
-            ..
-        } = result
-        else {
+        let SimplexResult::Infeasible(infeasible) = result else {
             panic!("expected infeasible warm-start result");
         };
-        assert_eq!(leaving.position, 1);
-        assert_eq!(certificate.support(1.0e-9), vec![1]);
-        assert_eq!(iterations, 0);
+        assert_eq!(infeasible.certificate.support(1.0e-9), vec![1]);
+        assert_eq!(infeasible.iterations, 0);
+        assert_eq!(infeasible.phase_one_objective_value, None);
     }
 
     #[test]
@@ -394,13 +307,13 @@ mod tests {
         let primal::ReusableSolveResult::Solved(solved) = reusable else {
             panic!("expected reusable solved state");
         };
-        assert!(matches!(solved.result(), WarmStartResult::Optimal(_)));
+        assert!(matches!(solved.result(), SimplexResult::Optimal(_)));
 
         let resolved = solved
             .reoptimize_with_rhs(array![-1.0, 1.0], &mut trace)
             .unwrap();
 
-        let WarmStartResult::Optimal(solution) = resolved.result() else {
+        let SimplexResult::Optimal(solution) = resolved.result() else {
             panic!("expected optimal reoptimized result");
         };
         assert_eq!(solution.basis_indices, vec![1, 2]);
