@@ -76,6 +76,7 @@ pub(crate) enum PhaseOneResult {
 /// the resulting basis can be converted to an original feasible basis for
 /// Phase II.
 pub struct PhaseOneAuxiliaryProblem {
+    original_lp: StandardFormLp,
     auxiliary_lp: StandardFormLp,
     original_column_count: usize,
     initial_basis_indices: Vec<usize>,
@@ -83,13 +84,14 @@ pub struct PhaseOneAuxiliaryProblem {
 }
 
 impl PhaseOneAuxiliaryProblem {
-    pub fn new(lp: &StandardFormLp) -> Self {
-        let normalized = normalize_rows(lp);
+    pub fn new(lp: StandardFormLp) -> Self {
+        let normalized = normalize_rows(&lp);
         let original_column_count = normalized.lp.a().ncols();
         let auxiliary_lp = build_auxiliary_lp(&normalized.lp);
         let initial_basis_indices =
             (original_column_count..original_column_count + normalized.lp.a().nrows()).collect();
         Self {
+            original_lp: lp,
             auxiliary_lp,
             original_column_count,
             initial_basis_indices,
@@ -115,6 +117,7 @@ impl PhaseOneAuxiliaryProblem {
         options: RevisedSimplexOptions,
         trace: &mut impl SimplexTrace,
     ) -> Result<PhaseOneResult, PhaseOneError> {
+        let original_lp = self.original_lp;
         let original_column_count = self.original_column_count;
         let row_signs = self.row_signs;
         let mut simplex = RevisedSimplex::new(
@@ -131,8 +134,13 @@ impl PhaseOneAuxiliaryProblem {
         {
             SolveResult::Optimal(solution) => {
                 if solution.objective_value > options.pivot_tolerance {
-                    let certificate = farkas_certificate(&simplex, &row_signs)
-                        .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
+                    let certificate = farkas_certificate(
+                        original_lp,
+                        &simplex,
+                        &row_signs,
+                        options.pivot_tolerance,
+                    )
+                    .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
                     return Ok(PhaseOneResult::Infeasible(PhaseOneInfeasible {
                         objective_value: solution.objective_value,
                         iterations: solution.iterations,
@@ -162,8 +170,10 @@ impl PhaseOneAuxiliaryProblem {
 }
 
 fn farkas_certificate(
+    original_lp: StandardFormLp,
     simplex: &RevisedSimplex,
     row_signs: &[f64],
+    tolerance: f64,
 ) -> Result<FarkasCertificate, StandardFormError> {
     let auxiliary_dual = simplex.dual_variables()?;
     let multiplier = Array1::from_iter(
@@ -172,7 +182,7 @@ fn farkas_certificate(
             .zip(row_signs.iter())
             .map(|(&dual_value, &row_sign)| -row_sign * dual_value),
     );
-    Ok(FarkasCertificate { multiplier })
+    FarkasCertificate::new(original_lp, multiplier, tolerance)
 }
 
 struct NormalizedLp {
@@ -287,7 +297,7 @@ mod tests {
         let lp = feasible_lp_without_slack_basis();
         let mut trace = FullTrace::default();
 
-        let result = PhaseOneAuxiliaryProblem::new(&lp)
+        let result = PhaseOneAuxiliaryProblem::new(lp.clone())
             .solve(RevisedSimplexOptions::default(), &mut trace)
             .unwrap();
 
@@ -307,7 +317,7 @@ mod tests {
     fn phase_one_auxiliary_problem_builds_artificial_basis() {
         let lp = feasible_lp_without_slack_basis();
 
-        let auxiliary = PhaseOneAuxiliaryProblem::new(&lp);
+        let auxiliary = PhaseOneAuxiliaryProblem::new(lp);
 
         assert_eq!(auxiliary.original_column_count(), 3);
         assert_eq!(auxiliary.initial_basis_indices(), &[3, 4]);
@@ -359,11 +369,16 @@ mod tests {
         match result {
             SimplexResult::Infeasible(infeasible) => {
                 assert_abs_diff_eq!(infeasible.objective_value, 1.0, epsilon = 1.0e-9);
-                let verification = infeasible.certificate.verify(&lp, 1.0e-9).unwrap();
-                assert!(
-                    verification.valid,
-                    "expected valid certificate, got {verification:?}"
-                );
+                assert_eq!(infeasible.certificate.lp(), &lp);
+                let column_values = lp.a().t().dot(infeasible.certificate.multiplier());
+                let minimum_column_value = column_values
+                    .iter()
+                    .copied()
+                    .min_by(f64::total_cmp)
+                    .unwrap();
+                let rhs_value = lp.b().dot(infeasible.certificate.multiplier());
+                assert!(minimum_column_value >= -1.0e-9);
+                assert!(rhs_value < -1.0e-9);
             }
             _ => panic!("expected infeasible result"),
         }
@@ -379,13 +394,16 @@ mod tests {
 
         match result {
             SimplexResult::Infeasible(infeasible) => {
-                let verification = infeasible.certificate.verify(&lp, 1.0e-9).unwrap();
-                assert!(
-                    verification.valid,
-                    "expected valid certificate, got {verification:?}"
-                );
-                assert!(verification.minimum_column_value >= -1.0e-9);
-                assert!(verification.rhs_value < -1.0e-9);
+                assert_eq!(infeasible.certificate.lp(), &lp);
+                let column_values = lp.a().t().dot(infeasible.certificate.multiplier());
+                let minimum_column_value = column_values
+                    .iter()
+                    .copied()
+                    .min_by(f64::total_cmp)
+                    .unwrap();
+                let rhs_value = lp.b().dot(infeasible.certificate.multiplier());
+                assert!(minimum_column_value >= -1.0e-9);
+                assert!(rhs_value < -1.0e-9);
             }
             _ => panic!("expected infeasible result"),
         }

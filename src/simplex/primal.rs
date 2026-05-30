@@ -102,7 +102,7 @@ pub fn solve(
     options: RevisedSimplexOptions,
     trace: &mut impl SimplexTrace,
 ) -> Result<SimplexResult, SimplexError> {
-    match PhaseOneAuxiliaryProblem::new(&lp).solve(options.clone(), trace)? {
+    match PhaseOneAuxiliaryProblem::new(lp.clone()).solve(options.clone(), trace)? {
         PhaseOneResult::Feasible { basis_indices } => {
             let mut simplex = RevisedSimplex::new(lp, basis_indices, options)?;
             trace.phase_started(SimplexTracePhase::PhaseTwo);

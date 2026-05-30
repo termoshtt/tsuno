@@ -67,7 +67,7 @@ use super::{Basis, BasisError};
 /// [`StandardFormLp::basis_costs`], [`StandardFormLp::dual_variables`],
 /// [`StandardFormLp::reduced_cost`], and
 /// [`StandardFormLp::most_negative_reduced_cost`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StandardFormLp {
     a: Array2<f64>,
     b: Array1<f64>,
@@ -104,66 +104,141 @@ pub struct PricedColumn {
 /// Indeed, any feasible $x \ge 0$ would imply
 /// $y^T A x = y^T b$, while $A^T y \ge 0$ gives
 /// $y^T A x \ge 0$ and $y^T b < 0$ gives a contradiction.
+///
+/// # Invariant
+///
+/// A value of this type owns the LP it certifies and a multiplier that has
+/// passed numerical certificate validation for that LP. The LP and multiplier
+/// are immutable after construction, so downstream analyses such as IIS
+/// extraction cannot accidentally apply the multiplier to a different problem.
 pub struct FarkasCertificate {
-    pub multiplier: Array1<f64>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-/// Numerical verification summary for a [`FarkasCertificate`].
-pub struct FarkasVerification {
-    pub minimum_column_value: f64,
-    pub rhs_value: f64,
-    pub valid: bool,
+    lp: StandardFormLp,
+    multiplier: Array1<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StandardFormError {
     EmptyProblem,
-    TooFewColumns { nrows: usize, ncols: usize },
-    RightHandSideLengthMismatch { expected: usize, actual: usize },
-    CostLengthMismatch { expected: usize, actual: usize },
-    BasisDimensionMismatch { expected: usize, actual: usize },
-    DualVariableLengthMismatch { expected: usize, actual: usize },
-    FarkasMultiplierLengthMismatch { expected: usize, actual: usize },
-    ColumnOutOfBounds { column: usize, ncols: usize },
+    TooFewColumns {
+        nrows: usize,
+        ncols: usize,
+    },
+    RightHandSideLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    CostLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    BasisDimensionMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    DualVariableLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    FarkasMultiplierLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    InvalidFarkasCertificate {
+        minimum_column_value: f64,
+        rhs_value: f64,
+    },
+    RowOutOfBounds {
+        row: usize,
+        nrows: usize,
+    },
+    ColumnOutOfBounds {
+        column: usize,
+        ncols: usize,
+    },
     Basis(BasisError),
 }
 
 impl FarkasCertificate {
-    /// Verify the certificate against a standard-form LP.
+    #[katexit::katexit]
+    /// Create a Farkas certificate after validating the multiplier.
     ///
-    /// This computes $\min_j (A^T y)_j$ and $b^T y$. The certificate is treated
-    /// as valid when
+    /// This returns an error unless `multiplier` has the same length as the
+    /// number of rows of `lp` and satisfies
     ///
     /// $$
-    /// \min_j (A^T y)_j \ge -\epsilon,\qquad b^T y < -\epsilon.
+    /// A^T y \ge -\epsilon,\qquad b^T y < -\epsilon,
     /// $$
-    pub fn verify(
-        &self,
-        lp: &StandardFormLp,
+    ///
+    /// where `tolerance` is $\epsilon$.
+    pub fn new(
+        lp: StandardFormLp,
+        multiplier: Array1<f64>,
         tolerance: f64,
-    ) -> Result<FarkasVerification, StandardFormError> {
-        if self.multiplier.len() != lp.a.nrows() {
-            return Err(StandardFormError::FarkasMultiplierLengthMismatch {
-                expected: lp.a.nrows(),
-                actual: self.multiplier.len(),
+    ) -> Result<Self, StandardFormError> {
+        let values = farkas_certificate_values(&lp, &multiplier)?;
+        let tolerance = tolerance.max(0.0);
+        if values.minimum_column_value < -tolerance || values.rhs_value >= -tolerance {
+            return Err(StandardFormError::InvalidFarkasCertificate {
+                minimum_column_value: values.minimum_column_value,
+                rhs_value: values.rhs_value,
             });
         }
-
-        let tolerance = tolerance.max(0.0);
-        let column_values = lp.a.t().dot(&self.multiplier);
-        let minimum_column_value = column_values
-            .iter()
-            .copied()
-            .min_by(f64::total_cmp)
-            .unwrap();
-        let rhs_value = lp.b.dot(&self.multiplier);
-        Ok(FarkasVerification {
-            minimum_column_value,
-            rhs_value,
-            valid: minimum_column_value >= -tolerance && rhs_value < -tolerance,
-        })
+        Ok(Self { lp, multiplier })
     }
+
+    pub fn lp(&self) -> &StandardFormLp {
+        &self.lp
+    }
+
+    /// Return the verified Farkas multiplier for the stored LP.
+    pub fn multiplier(&self) -> &Array1<f64> {
+        &self.multiplier
+    }
+
+    #[katexit::katexit]
+    /// Return the row support of the Farkas multiplier.
+    ///
+    /// This returns the row indices $i$ whose multiplier satisfies
+    /// $|y_i| > \epsilon$, where `tolerance` is $\epsilon$. After
+    /// [`FarkasCertificate::deletion_filter`], this support is the
+    /// standard-form row subsystem kept by the deletion filter.
+    pub fn support(&self, tolerance: f64) -> Vec<usize> {
+        let tolerance = tolerance.max(0.0);
+        self.multiplier
+            .iter()
+            .enumerate()
+            .filter_map(|(row, &value)| (value.abs() > tolerance).then_some(row))
+            .collect()
+    }
+}
+
+struct FarkasCertificateValues {
+    minimum_column_value: f64,
+    rhs_value: f64,
+}
+
+fn farkas_certificate_values(
+    lp: &StandardFormLp,
+    multiplier: &Array1<f64>,
+) -> Result<FarkasCertificateValues, StandardFormError> {
+    if multiplier.len() != lp.a.nrows() {
+        return Err(StandardFormError::FarkasMultiplierLengthMismatch {
+            expected: lp.a.nrows(),
+            actual: multiplier.len(),
+        });
+    }
+
+    let column_values = lp.a.t().dot(multiplier);
+    let minimum_column_value = column_values
+        .iter()
+        .copied()
+        .min_by(f64::total_cmp)
+        .unwrap();
+    let rhs_value = lp.b.dot(multiplier);
+    Ok(FarkasCertificateValues {
+        minimum_column_value,
+        rhs_value,
+    })
 }
 
 impl StandardFormLp {
@@ -182,6 +257,41 @@ impl StandardFormLp {
 
     pub fn c(&self) -> &Array1<f64> {
         &self.c
+    }
+
+    #[katexit::katexit]
+    /// Return the row subsystem selected from the equality constraints.
+    ///
+    /// For a row index set
+    ///
+    /// $$
+    /// R = \{i_0, i_1, \ldots, i_{k-1}\},
+    /// $$
+    ///
+    /// this returns the standard-form LP with the same cost vector `c` and
+    /// only the selected equality rows:
+    ///
+    /// $$
+    /// A_R x = b_R,\qquad x \ge 0.
+    /// $$
+    ///
+    /// The returned rows are ordered exactly as `rows`, so repeated row
+    /// indices repeat constraints in the subsystem. `rows` must be nonempty
+    /// because [`StandardFormLp`] itself does not represent empty problems.
+    pub fn row_subsystem(&self, rows: &[usize]) -> Result<Self, StandardFormError> {
+        let mut a = Array2::zeros((rows.len(), self.a.ncols()));
+        let mut b = Array1::zeros(rows.len());
+        for (target_row, &source_row) in rows.iter().enumerate() {
+            if source_row >= self.a.nrows() {
+                return Err(StandardFormError::RowOutOfBounds {
+                    row: source_row,
+                    nrows: self.a.nrows(),
+                });
+            }
+            a.row_mut(target_row).assign(&self.a.row(source_row));
+            b[target_row] = self.b[source_row];
+        }
+        Self::new(a, b, self.c.clone())
     }
 
     /// Return the `j`-th column of the constraint matrix.
@@ -484,32 +594,39 @@ mod tests {
     }
 
     #[test]
-    fn farkas_certificate_verifies_standard_form_infeasibility() {
+    fn row_subsystem_selects_constraint_rows_in_order() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]],
+            array![1.0, 2.0, 3.0],
+            array![4.0, 5.0, 6.0],
+        )
+        .unwrap();
+
+        let subsystem = lp.row_subsystem(&[2, 0]).unwrap();
+
+        assert_abs_diff_eq!(subsystem.a(), &array![[1.0, 1.0, 1.0], [1.0, 0.0, 0.0]]);
+        assert_abs_diff_eq!(subsystem.b(), &array![3.0, 1.0]);
+        assert_abs_diff_eq!(subsystem.c(), &array![4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn farkas_certificate_constructs_verified_standard_form_infeasibility_certificate() {
         let lp = StandardFormLp::new(
             array![[1.0, 0.0], [1.0, 0.0]],
             array![1.0, 2.0],
             array![0.0, 0.0],
         )
         .unwrap();
-        let certificate = FarkasCertificate {
-            multiplier: array![1.0, -1.0],
-        };
+        let certificate = FarkasCertificate::new(lp.clone(), array![1.0, -1.0], 1.0e-9).unwrap();
 
-        let verification = certificate.verify(&lp, 1.0e-9).unwrap();
-
-        assert_abs_diff_eq!(verification.minimum_column_value, 0.0, epsilon = 1.0e-9);
-        assert_abs_diff_eq!(verification.rhs_value, -1.0, epsilon = 1.0e-9);
-        assert!(verification.valid);
+        assert_eq!(certificate.lp(), &lp);
+        assert_abs_diff_eq!(certificate.multiplier(), &array![1.0, -1.0]);
     }
 
     #[test]
     fn farkas_certificate_rejects_wrong_multiplier_length() {
         let lp = slack_lp();
-        let certificate = FarkasCertificate {
-            multiplier: array![1.0],
-        };
-
-        let error = certificate.verify(&lp, 1.0e-9).unwrap_err();
+        let error = FarkasCertificate::new(lp, array![1.0], 1.0e-9).unwrap_err();
 
         assert_eq!(
             error,
