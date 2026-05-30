@@ -194,6 +194,22 @@ impl FarkasCertificate {
     pub fn multiplier(&self) -> &Array1<f64> {
         &self.multiplier
     }
+
+    #[katexit::katexit]
+    /// Return the row support of the Farkas multiplier.
+    ///
+    /// This returns the row indices $i$ whose multiplier satisfies
+    /// $|y_i| > \epsilon$, where `tolerance` is $\epsilon$. After
+    /// [`FarkasCertificate::deletion_filter`], this support is the
+    /// standard-form row subsystem kept by the deletion filter.
+    pub fn support(&self, tolerance: f64) -> Vec<usize> {
+        let tolerance = tolerance.max(0.0);
+        self.multiplier
+            .iter()
+            .enumerate()
+            .filter_map(|(row, &value)| (value.abs() > tolerance).then_some(row))
+            .collect()
+    }
 }
 
 struct FarkasCertificateValues {

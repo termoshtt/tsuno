@@ -114,10 +114,12 @@ b^T y < 0
 which proves that no feasible `x >= 0` can satisfy `A x = b`.
 
 - [x] Add a `FarkasCertificate` type for standard-form LPs.
-- [x] Add verification APIs that report `min(A^T y)` and `b^T y`.
+- [x] Make `FarkasCertificate` own the LP it certifies and preserve the
+  certificate invariant at construction time.
+- [x] Add certificate support extraction for standard-form row indices.
 - [x] Return a certificate from Phase I infeasible results.
 - [x] Add tests that validate certificates produced by Phase I.
-- [ ] Keep extending the certificate API for IIS construction.
+- [x] Use deletion filter to simplify Farkas certificates.
 
 ### IIS Construction
 
@@ -128,8 +130,8 @@ to the caller.
 
 - [x] Implement a deletion-filter IIS algorithm for standard-form row
   subsystems.
-- [x] Return standard-form row indices and a Farkas certificate for the row
-  subsystem.
+- [x] Represent IIS extraction as certificate simplification followed by
+  support extraction.
 - [x] Use Farkas certificates as infeasibility witnesses.
 - [x] Expose IIS construction as additional analysis from a Farkas certificate,
   rather than as a direct operation on arbitrary LPs.
