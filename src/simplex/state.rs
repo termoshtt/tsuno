@@ -77,6 +77,24 @@ impl RevisedSimplexState {
         })
     }
 
+    #[katexit::katexit]
+    /// Replace the stored right-hand side while keeping the current basis.
+    ///
+    /// Changing $b$ in
+    ///
+    /// $$
+    /// A x = b
+    /// $$
+    ///
+    /// changes the basic values $x_I = B^{-1}b$, but it does not change the
+    /// basis matrix $B = A_I$ or the reduced costs because $A$ and $c$ are
+    /// unchanged. Therefore the LU representation inside [`Basis`] can be
+    /// reused directly.
+    pub fn replace_rhs(self, rhs: Array1<f64>) -> Result<Self, StandardFormError> {
+        let lp = self.lp.replace_rhs(rhs)?;
+        Ok(Self { lp, ..self })
+    }
+
     pub(crate) fn solve_basis_column(
         &self,
         column: usize,

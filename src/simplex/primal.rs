@@ -4,7 +4,10 @@ use super::revised_simplex::{
     RevisedSimplexOptions, SimplexError, SimplexResult, SimplexSolution, SimplexTrace,
     SimplexTraceEvent, SimplexTracePhase, SimplexTraceStep,
 };
-use super::{Basis, PricedColumn, RevisedSimplexState, StandardFormError, StandardFormLp};
+use super::{
+    Basis, PricedColumn, RevisedSimplexState, SolvedSimplex, StandardFormError, StandardFormLp,
+    WarmStartResult,
+};
 
 mod phase_one;
 
@@ -70,6 +73,15 @@ pub enum SolveResult {
     },
 }
 
+#[derive(Debug)]
+/// Result of the top-level primal solve entry point that preserves reusable
+/// simplex state when Phase II is reached.
+pub enum ReusableSolveResult {
+    Solved(SolvedSimplex),
+    PhaseOneIterationLimit(PhaseOneIterationLimit),
+    Infeasible(PhaseOneInfeasible),
+}
+
 #[katexit::katexit]
 /// Solve a standard-form LP with a Phase I feasible-basis construction.
 ///
@@ -110,6 +122,38 @@ pub fn solve(
         }
         PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(infeasible)),
         PhaseOneResult::IterationLimit(limit) => Ok(SimplexResult::PhaseOneIterationLimit(limit)),
+    }
+}
+
+#[katexit::katexit]
+/// Solve a standard-form LP and keep the terminal Phase II state reusable.
+///
+/// This follows the same Phase I then Phase II flow as [`solve`]. When Phase I
+/// proves infeasibility, no reusable basis state for the original LP exists and
+/// the infeasibility result is returned directly. When Phase I reaches a
+/// feasible original basis, Phase II is solved and the terminal basis state is
+/// returned as [`SolvedSimplex`], so callers can reoptimize after supported LP
+/// edits such as replacing $b$.
+pub fn solve_reusable(
+    lp: StandardFormLp,
+    options: RevisedSimplexOptions,
+    trace: &mut impl SimplexTrace,
+) -> Result<ReusableSolveResult, SimplexError> {
+    match PhaseOneAuxiliaryProblem::new(lp.clone()).solve(options.clone(), trace)? {
+        PhaseOneResult::Feasible { basis_indices } => {
+            let mut simplex = RevisedSimplex::new(lp, basis_indices, options)?;
+            trace.phase_started(SimplexTracePhase::PhaseTwo);
+            let result = simplex.solve(trace)?;
+            let state = simplex.into_state();
+            Ok(ReusableSolveResult::Solved(SolvedSimplex::new(
+                state,
+                WarmStartResult::from(result),
+            )))
+        }
+        PhaseOneResult::Infeasible(infeasible) => Ok(ReusableSolveResult::Infeasible(infeasible)),
+        PhaseOneResult::IterationLimit(limit) => {
+            Ok(ReusableSolveResult::PhaseOneIterationLimit(limit))
+        }
     }
 }
 
