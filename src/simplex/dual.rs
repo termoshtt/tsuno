@@ -323,12 +323,7 @@ impl DualRevisedSimplex {
         self.basis.solve_transposed(&unit)
     }
 
-    /// Build the Farkas certificate associated with a dual infeasible row.
-    ///
-    /// This is called after the dual ratio test has found no eligible entering
-    /// column, so the multiplier is known to prove primal infeasibility for
-    /// the stored LP.
-    pub fn infeasibility_certificate(
+    fn infeasibility_certificate(
         &self,
         leaving: &LeavingBasicVariable,
     ) -> Result<FarkasCertificate, StandardFormError> {

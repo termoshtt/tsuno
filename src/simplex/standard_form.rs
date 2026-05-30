@@ -259,7 +259,26 @@ impl StandardFormLp {
         &self.c
     }
 
-    pub(crate) fn row_subsystem(&self, rows: &[usize]) -> Result<Self, StandardFormError> {
+    #[katexit::katexit]
+    /// Return the row subsystem selected from the equality constraints.
+    ///
+    /// For a row index set
+    ///
+    /// $$
+    /// R = \{i_0, i_1, \ldots, i_{k-1}\},
+    /// $$
+    ///
+    /// this returns the standard-form LP with the same cost vector `c` and
+    /// only the selected equality rows:
+    ///
+    /// $$
+    /// A_R x = b_R,\qquad x \ge 0.
+    /// $$
+    ///
+    /// The returned rows are ordered exactly as `rows`, so repeated row
+    /// indices repeat constraints in the subsystem. `rows` must be nonempty
+    /// because [`StandardFormLp`] itself does not represent empty problems.
+    pub fn row_subsystem(&self, rows: &[usize]) -> Result<Self, StandardFormError> {
         let mut a = Array2::zeros((rows.len(), self.a.ncols()));
         let mut b = Array1::zeros(rows.len());
         for (target_row, &source_row) in rows.iter().enumerate() {
@@ -572,6 +591,22 @@ mod tests {
         let reduced_cost = lp.reduced_cost(&dual_variables, 2).unwrap();
 
         assert_abs_diff_eq!(reduced_cost, -6.0 / 5.0, epsilon = 1.0e-9);
+    }
+
+    #[test]
+    fn row_subsystem_selects_constraint_rows_in_order() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]],
+            array![1.0, 2.0, 3.0],
+            array![4.0, 5.0, 6.0],
+        )
+        .unwrap();
+
+        let subsystem = lp.row_subsystem(&[2, 0]).unwrap();
+
+        assert_abs_diff_eq!(subsystem.a(), &array![[1.0, 1.0, 1.0], [1.0, 0.0, 0.0]]);
+        assert_abs_diff_eq!(subsystem.b(), &array![3.0, 1.0]);
+        assert_abs_diff_eq!(subsystem.c(), &array![4.0, 5.0, 6.0]);
     }
 
     #[test]
