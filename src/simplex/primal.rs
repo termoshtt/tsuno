@@ -1,8 +1,8 @@
 use ndarray::Array1;
 
 use super::revised_simplex::{
-    RevisedSimplexOptions, SimplexError, SimplexInfeasible, SimplexResult, SimplexSolution,
-    SimplexTrace, SimplexTraceEvent, SimplexTracePhase, SimplexTraceStep,
+    RevisedSimplexOptions, SimplexError, SimplexResult, SimplexSolution, SimplexTrace,
+    SimplexTraceEvent, SimplexTracePhase, SimplexTraceStep,
 };
 use super::{
     Basis, PricedColumn, RevisedSimplexState, SolvedSimplex, StandardFormError, StandardFormLp,
@@ -118,9 +118,9 @@ pub fn solve(
             trace.phase_started(SimplexTracePhase::PhaseTwo);
             simplex.solve(trace).map(SimplexResult::from)
         }
-        PhaseOneResult::Infeasible(infeasible) => Ok(SimplexResult::Infeasible(
-            SimplexInfeasible::from(infeasible),
-        )),
+        PhaseOneResult::Infeasible(infeasible) => {
+            Ok(SimplexResult::Infeasible(infeasible.certificate))
+        }
         PhaseOneResult::IterationLimit(limit) => Ok(SimplexResult::PhaseOneIterationLimit(limit)),
     }
 }
@@ -151,7 +151,7 @@ pub fn solve_reusable(
             )))
         }
         PhaseOneResult::Infeasible(infeasible) => Ok(ReusableSolveResult::NotReusable(
-            SimplexResult::Infeasible(SimplexInfeasible::from(infeasible)),
+            SimplexResult::Infeasible(infeasible.certificate),
         )),
         PhaseOneResult::IterationLimit(limit) => Ok(ReusableSolveResult::NotReusable(
             SimplexResult::PhaseOneIterationLimit(limit),

@@ -295,12 +295,10 @@ mod tests {
 
         let result = start.solve(&mut trace).unwrap();
 
-        let SimplexResult::Infeasible(infeasible) = result else {
+        let SimplexResult::Infeasible(certificate) = result else {
             panic!("expected infeasible warm-start result");
         };
-        assert_eq!(infeasible.certificate.support(1.0e-9), vec![1]);
-        assert_eq!(infeasible.iterations, 0);
-        assert_eq!(infeasible.phase_one_objective_value, None);
+        assert_eq!(certificate.support(1.0e-9), vec![1]);
     }
 
     #[test]
