@@ -1,8 +1,9 @@
 use ndarray::Array1;
 
-use super::{PricedColumn, StandardFormError};
+use super::{FarkasCertificate, PricedColumn, StandardFormError};
+use crate::simplex::dual::SolveResult as DualSolveResult;
 use crate::simplex::primal::{
-    PhaseOneError, PhaseOneInfeasible, PhaseOneIterationLimit, PrimalSimplexError, SolveResult,
+    PhaseOneError, PhaseOneIterationLimit, PrimalSimplexError, SolveResult,
 };
 
 mod trace;
@@ -67,7 +68,7 @@ pub enum SimplexResult {
     Optimal(SimplexSolution),
     IterationLimit(SimplexSolution),
     PhaseOneIterationLimit(PhaseOneIterationLimit),
-    Infeasible(PhaseOneInfeasible),
+    Infeasible(FarkasCertificate),
     Unbounded {
         entering: PricedColumn,
         direction: Array1<f64>,
@@ -89,6 +90,18 @@ impl From<SolveResult> for SimplexResult {
                 direction,
                 iterations,
             },
+        }
+    }
+}
+
+impl From<DualSolveResult> for SimplexResult {
+    fn from(result: DualSolveResult) -> Self {
+        match result {
+            DualSolveResult::Optimal(solution) => SimplexResult::Optimal(solution),
+            DualSolveResult::IterationLimit(solution) => SimplexResult::IterationLimit(solution),
+            DualSolveResult::Infeasible { certificate, .. } => {
+                SimplexResult::Infeasible(certificate)
+            }
         }
     }
 }

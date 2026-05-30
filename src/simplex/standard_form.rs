@@ -260,6 +260,23 @@ impl StandardFormLp {
     }
 
     #[katexit::katexit]
+    /// Replace the right-hand side vector.
+    ///
+    /// For
+    ///
+    /// $$
+    /// A x = b,\qquad x \ge 0,
+    /// $$
+    ///
+    /// this returns the LP with the same constraint matrix $A$ and objective
+    /// vector $c$, but with a new right-hand side. This operation preserves the
+    /// shape of the basis matrix $B = A_I$, so a caller that owns a compatible
+    /// basis representation can reuse it for reoptimization.
+    pub fn replace_rhs(self, b: Array1<f64>) -> Result<Self, StandardFormError> {
+        Self::new(self.a, b, self.c)
+    }
+
+    #[katexit::katexit]
     /// Return the row subsystem selected from the equality constraints.
     ///
     /// For a row index set

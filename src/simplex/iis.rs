@@ -71,9 +71,9 @@ impl FarkasCertificate {
                 | SimplexResult::Unbounded { .. } => {
                     position += 1;
                 }
-                SimplexResult::Infeasible(infeasible) => {
+                SimplexResult::Infeasible(certificate) => {
                     rows = candidate_rows;
-                    reduced_certificate = Some(infeasible.certificate);
+                    reduced_certificate = Some(certificate);
                 }
                 SimplexResult::PhaseOneIterationLimit(_) => {
                     return Err(IisError::IterationLimit {
