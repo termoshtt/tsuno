@@ -77,6 +77,16 @@ simple and testable, but it is not the final performance target.
   bases, so top-level solve does not always need Phase I.
 - [ ] Add a top-level dual-simplex entry point that can construct or recover a
   dual-feasible starting basis when useful.
+- [ ] Add warm-start and reoptimization APIs for modified LPs.
+  - Reuse the current basis when only the right-hand side `b` changes, using
+    dual simplex when primal feasibility is broken.
+  - Reuse the current basis when only the objective `c` changes, using primal
+    simplex when dual feasibility is broken.
+  - Reuse basis factorizations when nonbasis columns of `A` change.
+  - Refactorize or update the basis representation when basis columns of `A`
+    change.
+  - Support constraint and variable additions and deletions, including basis
+    repair and index-map updates.
 - [ ] Expand pivot selection strategies beyond the current deterministic rules.
 - [ ] Add more numerical termination checks around residuals and certificate
   quality.
