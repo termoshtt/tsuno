@@ -4,7 +4,7 @@ use super::revised_simplex::{
     RevisedSimplexOptions, SimplexError, SimplexResult, SimplexSolution, SimplexTrace,
     SimplexTraceEvent, SimplexTracePhase, SimplexTraceStep,
 };
-use super::{Basis, PricedColumn, StandardFormError, StandardFormLp};
+use super::{Basis, PricedColumn, RevisedSimplexState, StandardFormError, StandardFormLp};
 
 mod phase_one;
 
@@ -161,9 +161,7 @@ pub fn solve(
 /// column with $q$.
 #[derive(Debug)]
 pub struct RevisedSimplex {
-    pub(crate) lp: StandardFormLp,
-    pub(crate) basis: Basis,
-    options: RevisedSimplexOptions,
+    state: RevisedSimplexState,
 }
 
 impl RevisedSimplex {
@@ -172,25 +170,35 @@ impl RevisedSimplex {
         basis_indices: Vec<usize>,
         options: RevisedSimplexOptions,
     ) -> Result<Self, PrimalSimplexError> {
-        let basis = lp.basis(basis_indices)?;
-        if let Some((position, value)) =
-            primal_infeasible_basic_value(&lp, &basis, options.pivot_tolerance)?
-        {
+        let state = RevisedSimplexState::new(lp, basis_indices, options)?;
+        Self::from_state(state)
+    }
+
+    pub fn from_state(state: RevisedSimplexState) -> Result<Self, PrimalSimplexError> {
+        if let Some((position, value)) = primal_infeasible_basic_value(
+            state.lp(),
+            state.basis(),
+            state.options().pivot_tolerance,
+        )? {
             return Err(PrimalSimplexError::PrimalInfeasibleInitialBasis { position, value });
         }
-        Ok(Self { lp, basis, options })
+        Ok(Self { state })
     }
 
     pub fn lp(&self) -> &StandardFormLp {
-        &self.lp
+        self.state.lp()
     }
 
     pub fn basis(&self) -> &Basis {
-        &self.basis
+        self.state.basis()
     }
 
     pub fn options(&self) -> &RevisedSimplexOptions {
-        &self.options
+        self.state.options()
+    }
+
+    pub fn into_state(self) -> RevisedSimplexState {
+        self.state
     }
 
     /// Compute the current basic solution values.
@@ -199,7 +207,7 @@ impl RevisedSimplex {
     /// See that method for the mathematical definition of the returned
     /// $x_I = B^{-1} b$ vector.
     pub fn basic_solution(&self) -> Result<Array1<f64>, StandardFormError> {
-        self.lp.basic_solution(&self.basis)
+        self.state.basic_solution()
     }
 
     /// Compute the dual variables for the current basis.
@@ -207,7 +215,7 @@ impl RevisedSimplex {
     /// This is a state-level wrapper around [`StandardFormLp::dual_variables`].
     /// See that method for the transposed basis system $B^T y = c_I$.
     pub fn dual_variables(&self) -> Result<Array1<f64>, StandardFormError> {
-        self.lp.dual_variables(&self.basis)
+        self.state.dual_variables()
     }
 
     /// Compute reduced costs for all current nonbasis columns.
@@ -215,7 +223,7 @@ impl RevisedSimplex {
     /// This is a state-level wrapper around [`StandardFormLp::reduced_costs`].
     /// See that method for the definition of $r_j = c_j - A_j^T y$.
     pub fn reduced_costs(&self) -> Result<Vec<PricedColumn>, StandardFormError> {
-        self.lp.reduced_costs(&self.basis)
+        self.state.reduced_costs()
     }
 
     /// Select the nonbasis column with the most negative reduced cost.
@@ -224,8 +232,8 @@ impl RevisedSimplex {
     /// [`StandardFormLp::most_negative_reduced_cost`] using
     /// [`RevisedSimplexOptions::reduced_cost_tolerance`].
     pub fn most_negative_reduced_cost(&self) -> Result<Option<PricedColumn>, StandardFormError> {
-        self.lp
-            .most_negative_reduced_cost(&self.basis, self.options.reduced_cost_tolerance)
+        self.lp()
+            .most_negative_reduced_cost(self.basis(), self.options().reduced_cost_tolerance)
     }
 
     pub fn step(&mut self) -> Result<Step, StandardFormError> {
@@ -236,7 +244,7 @@ impl RevisedSimplex {
         let basic_solution = self.basic_solution()?;
         let direction = self.pivot_direction(entering.column)?;
         let Some(leaving_position) =
-            primal_minimum_ratio_test(&basic_solution, &direction, self.options.pivot_tolerance)
+            primal_minimum_ratio_test(&basic_solution, &direction, self.options().pivot_tolerance)
         else {
             return Ok(Step::Unbounded {
                 entering,
@@ -245,14 +253,12 @@ impl RevisedSimplex {
         };
 
         let leaving = LeavingColumn {
-            column: self.basis.indices()[leaving_position.position],
+            column: self.basis().indices()[leaving_position.position],
             step_length: leaving_position.step_length,
         };
 
-        let entering_column = self.lp.column(entering.column)?.to_owned();
-        self.basis
-            .replace_column(leaving_position.position, entering.column, &entering_column)
-            .map_err(StandardFormError::Basis)?;
+        self.state
+            .replace_basis_column(leaving_position.position, entering.column)?;
 
         Ok(Step::Pivoted {
             entering,
@@ -262,8 +268,19 @@ impl RevisedSimplex {
     }
 
     fn pivot_direction(&self, entering_column: usize) -> Result<Array1<f64>, StandardFormError> {
-        let column = self.lp.column(entering_column)?.to_owned();
-        Ok(self.basis.solve(&column))
+        self.state.solve_basis_column(entering_column)
+    }
+
+    pub(crate) fn basis_direction(&self, column: usize) -> Result<Array1<f64>, StandardFormError> {
+        self.state.solve_basis_column(column)
+    }
+
+    pub(crate) fn replace_basis_column(
+        &mut self,
+        position: usize,
+        column: usize,
+    ) -> Result<(), StandardFormError> {
+        self.state.replace_basis_column(position, column)
     }
 
     /// Repeatedly apply primal revised simplex steps until termination.
@@ -292,18 +309,20 @@ impl RevisedSimplex {
     /// the solver has a valid current basis and solution, but has not proved
     /// optimality.
     pub fn solve(&mut self, trace: &mut impl SimplexTrace) -> Result<SolveResult, SimplexError> {
-        for iteration in 0..self.options.max_iterations {
-            trace.step_started(iteration, self.basis.indices());
+        for iteration in 0..self.options().max_iterations {
+            trace.step_started(iteration, self.basis().indices());
             let step = self.step()?;
             trace.step_completed(SimplexTraceEvent {
                 iteration,
                 step: SimplexTraceStep::Primal(&step),
-                basis_after: self.basis.indices(),
+                basis_after: self.basis().indices(),
             });
 
             match step {
                 Step::Optimal => {
-                    return Ok(SolveResult::Optimal(self.current_solution(iteration)?));
+                    return Ok(SolveResult::Optimal(
+                        self.state.current_solution(iteration)?,
+                    ));
                 }
                 Step::Unbounded {
                     entering,
@@ -320,38 +339,12 @@ impl RevisedSimplex {
         }
 
         Ok(SolveResult::IterationLimit(
-            self.current_solution(self.options.max_iterations)?,
+            self.state.current_solution(self.options().max_iterations)?,
         ))
     }
-
-    fn current_solution(&self, iterations: usize) -> Result<SimplexSolution, StandardFormError> {
-        let basic_solution = self.basic_solution()?;
-        let primal = full_primal_solution(self.lp.c().len(), self.basis.indices(), &basic_solution);
-        let dual = self.dual_variables()?;
-        let objective_value = self.lp.c().dot(&primal);
-        Ok(SimplexSolution {
-            primal,
-            dual,
-            objective_value,
-            basis_indices: self.basis.indices().to_vec(),
-            iterations,
-        })
-    }
 }
 
-fn full_primal_solution(
-    dimension: usize,
-    basis_indices: &[usize],
-    basic_solution: &Array1<f64>,
-) -> Array1<f64> {
-    let mut primal = Array1::zeros(dimension);
-    for (&column, &value) in basis_indices.iter().zip(basic_solution.iter()) {
-        primal[column] = value;
-    }
-    primal
-}
-
-fn primal_infeasible_basic_value(
+pub(crate) fn primal_infeasible_basic_value(
     lp: &StandardFormLp,
     basis: &Basis,
     tolerance: f64,

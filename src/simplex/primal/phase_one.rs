@@ -156,7 +156,7 @@ impl PhaseOneAuxiliaryProblem {
                     original_column_count,
                     options.pivot_tolerance,
                 )?;
-                let basis_indices = simplex.basis.indices().to_vec();
+                let basis_indices = simplex.basis().indices().to_vec();
                 Ok(PhaseOneResult::Feasible { basis_indices })
             }
             SolveResult::IterationLimit(solution) => {
@@ -237,8 +237,8 @@ fn pivot_out_artificial_columns(
     // no original replacement. For now this is reported as a Phase I extraction
     // failure; later redundant-row handling can make this path less strict.
     let mut position = 0;
-    while position < simplex.basis.indices().len() {
-        if simplex.basis.indices()[position] < original_column_count {
+    while position < simplex.basis().indices().len() {
+        if simplex.basis().indices()[position] < original_column_count {
             position += 1;
             continue;
         }
@@ -249,14 +249,8 @@ fn pivot_out_artificial_columns(
             return Err(PhaseOneError::NoOriginalFeasibleBasis);
         };
 
-        let column = simplex
-            .lp
-            .column(replacement)
-            .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?
-            .to_owned();
         simplex
-            .basis
-            .replace_column(position, replacement, &column)
+            .replace_basis_column(position, replacement)
             .map_err(|_| PhaseOneError::NoOriginalFeasibleBasis)?;
         position += 1;
     }
@@ -269,16 +263,17 @@ fn original_replacement_column(
     position: usize,
     tolerance: f64,
 ) -> Option<usize> {
-    let mut is_basis = vec![false; simplex.lp.a().ncols()];
-    for &column in simplex.basis.indices() {
+    let mut is_basis = vec![false; simplex.lp().a().ncols()];
+    for &column in simplex.basis().indices() {
         is_basis[column] = true;
     }
 
     (0..original_column_count)
         .filter(|&column| !is_basis[column])
         .find(|&column| {
-            let candidate = simplex.lp.column(column).unwrap().to_owned();
-            let direction = simplex.basis.solve(&candidate);
+            let direction = simplex
+                .basis_direction(column)
+                .expect("candidate column should be in bounds");
             direction[position].abs() > tolerance
         })
 }
