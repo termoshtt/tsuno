@@ -1,6 +1,6 @@
 mod basis;
 pub mod dual;
-pub mod iis;
+mod iis;
 pub mod primal;
 mod revised_simplex;
 mod standard_form;

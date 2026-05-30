@@ -84,14 +84,14 @@ pub struct PhaseOneAuxiliaryProblem {
 }
 
 impl PhaseOneAuxiliaryProblem {
-    pub fn new(lp: &StandardFormLp) -> Self {
-        let normalized = normalize_rows(lp);
+    pub fn new(lp: StandardFormLp) -> Self {
+        let normalized = normalize_rows(&lp);
         let original_column_count = normalized.lp.a().ncols();
         let auxiliary_lp = build_auxiliary_lp(&normalized.lp);
         let initial_basis_indices =
             (original_column_count..original_column_count + normalized.lp.a().nrows()).collect();
         Self {
-            original_lp: lp.clone(),
+            original_lp: lp,
             auxiliary_lp,
             original_column_count,
             initial_basis_indices,
@@ -297,7 +297,7 @@ mod tests {
         let lp = feasible_lp_without_slack_basis();
         let mut trace = FullTrace::default();
 
-        let result = PhaseOneAuxiliaryProblem::new(&lp)
+        let result = PhaseOneAuxiliaryProblem::new(lp.clone())
             .solve(RevisedSimplexOptions::default(), &mut trace)
             .unwrap();
 
@@ -317,7 +317,7 @@ mod tests {
     fn phase_one_auxiliary_problem_builds_artificial_basis() {
         let lp = feasible_lp_without_slack_basis();
 
-        let auxiliary = PhaseOneAuxiliaryProblem::new(&lp);
+        let auxiliary = PhaseOneAuxiliaryProblem::new(lp);
 
         assert_eq!(auxiliary.original_column_count(), 3);
         assert_eq!(auxiliary.initial_basis_indices(), &[3, 4]);
