@@ -32,6 +32,8 @@ It currently provides:
 - Primal revised simplex with Phase I feasible-basis construction and
   `simplex::primal::solve`.
 - Dual revised simplex for dual-feasible initial bases.
+- Warm-start selection that rebuilds a modified LP from an existing basis and
+  chooses primal or dual revised simplex when one invariant still holds.
 - Structured simplex traces for solver paths and snapshot tests.
 - Farkas certificates for infeasible standard-form LPs.
 - Certificate simplification by deletion filter; the support of a simplified
@@ -77,7 +79,8 @@ simple and testable, but it is not the final performance target.
   bases, so top-level solve does not always need Phase I.
 - [ ] Add a top-level dual-simplex entry point that can construct or recover a
   dual-feasible starting basis when useful.
-- [ ] Add warm-start and reoptimization APIs for modified LPs.
+- [x] Add a refactorization-based warm-start entry point for modified LPs.
+- [ ] Extend warm-start and reoptimization APIs for modified LPs.
   - Reuse the current basis when only the right-hand side `b` changes, using
     dual simplex when primal feasibility is broken.
   - Reuse the current basis when only the objective `c` changes, using primal

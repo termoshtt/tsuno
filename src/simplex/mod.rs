@@ -4,6 +4,7 @@ mod iis;
 pub mod primal;
 mod revised_simplex;
 mod standard_form;
+mod warm_start;
 
 pub use basis::*;
 pub use iis::*;
@@ -13,3 +14,4 @@ pub use revised_simplex::{
     SimplexTraceStep,
 };
 pub use standard_form::*;
+pub use warm_start::*;
