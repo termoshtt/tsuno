@@ -37,6 +37,7 @@ pub struct SolvedSimplex {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReoptimizationError {
     WarmStart(WarmStartError),
+    Dual(DualSimplexError),
     Simplex(SimplexError),
 }
 
@@ -49,6 +50,12 @@ impl From<WarmStartError> for ReoptimizationError {
 impl From<SimplexError> for ReoptimizationError {
     fn from(error: SimplexError) -> Self {
         ReoptimizationError::Simplex(error)
+    }
+}
+
+impl From<DualSimplexError> for ReoptimizationError {
+    fn from(error: DualSimplexError) -> Self {
+        ReoptimizationError::Dual(error)
     }
 }
 
@@ -97,7 +104,10 @@ impl SolvedSimplex {
         trace: &mut impl SimplexTrace,
     ) -> Result<Self, ReoptimizationError> {
         let state = self.state.replace_rhs(rhs)?;
-        WarmStart::from_state(state)?.solve_reusable(trace)
+        let mut simplex = DualRevisedSimplex::from_state(state)?;
+        let result = simplex.solve(trace)?;
+        let state = simplex.into_state();
+        Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
     }
 }
 
