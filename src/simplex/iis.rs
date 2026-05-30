@@ -65,8 +65,8 @@ impl FarkasCertificate {
     ///
     /// This method treats IIS construction as an additional analysis performed
     /// after infeasibility has already been proved. It first verifies this
-    /// certificate against `lp`; only then does it run a deletion filter over
-    /// the standard-form rows.
+    /// certificate against its stored LP; only then does it run a deletion
+    /// filter over the standard-form rows.
     ///
     /// For a valid certificate $y$ of
     ///
@@ -81,22 +81,21 @@ impl FarkasCertificate {
     /// original full system.
     pub fn deletion_filter_iis(
         &self,
-        lp: &StandardFormLp,
         options: RevisedSimplexOptions,
         certificate_tolerance: f64,
     ) -> Result<IisResult, IisError> {
-        let verification = self.verify(lp, certificate_tolerance)?;
+        let verification = self.verify(certificate_tolerance);
         if !verification.valid {
             return Err(IisError::InvalidCertificate(verification));
         }
 
-        let mut rows: Vec<_> = (0..lp.a().nrows()).collect();
+        let mut rows: Vec<_> = (0..self.lp().a().nrows()).collect();
         let mut position = 0;
         while position < rows.len() {
             let mut candidate_rows = rows.clone();
             candidate_rows.remove(position);
 
-            match feasibility(lp, &candidate_rows, options.clone())? {
+            match feasibility(self.lp(), &candidate_rows, options.clone())? {
                 Feasibility::Feasible => {
                     position += 1;
                 }
@@ -111,7 +110,7 @@ impl FarkasCertificate {
             }
         }
 
-        match feasibility(lp, &rows, options)? {
+        match feasibility(self.lp(), &rows, options)? {
             Feasibility::Infeasible(certificate) => {
                 Ok(IisResult::Infeasible(StandardFormIis { rows, certificate }))
             }
@@ -164,15 +163,9 @@ mod tests {
             array![0.0, 0.0, 0.0, 0.0],
         )
         .unwrap();
-        let certificate = FarkasCertificate {
-            multiplier: array![0.0, 0.0],
-        };
+        let error = FarkasCertificate::new(lp, array![0.0, 0.0], 1.0e-9).unwrap_err();
 
-        let error = certificate
-            .deletion_filter_iis(&lp, RevisedSimplexOptions::default(), 1.0e-9)
-            .unwrap_err();
-
-        let IisError::InvalidCertificate(verification) = error else {
+        let StandardFormError::InvalidFarkasCertificate(verification) = error else {
             panic!("expected an invalid certificate error");
         };
         assert!(!verification.valid);
@@ -186,12 +179,11 @@ mod tests {
             array![0.0, 0.0, 0.0],
         )
         .unwrap();
-        let certificate = FarkasCertificate {
-            multiplier: array![1.0, -1.0, 0.0],
-        };
+        let certificate =
+            FarkasCertificate::new(lp.clone(), array![1.0, -1.0, 0.0], 1.0e-9).unwrap();
 
         let result = certificate
-            .deletion_filter_iis(&lp, RevisedSimplexOptions::default(), 1.0e-9)
+            .deletion_filter_iis(RevisedSimplexOptions::default(), 1.0e-9)
             .unwrap();
 
         let IisResult::Infeasible(iis) = result else {
@@ -200,7 +192,8 @@ mod tests {
         assert_eq!(iis.rows, vec![0, 1]);
 
         let subsystem = lp.row_subsystem(&iis.rows).unwrap();
-        let verification = iis.certificate.verify(&subsystem, 1.0e-9).unwrap();
+        assert_eq!(iis.certificate.lp(), &subsystem);
+        let verification = iis.certificate.verify(1.0e-9);
         assert!(verification.valid);
         assert_abs_diff_eq!(verification.minimum_column_value, 0.0, epsilon = 1.0e-9);
         assert!(verification.rhs_value < 0.0);
@@ -214,12 +207,10 @@ mod tests {
             array![0.0, 0.0],
         )
         .unwrap();
-        let certificate = FarkasCertificate {
-            multiplier: array![1.0, -1.0],
-        };
+        let certificate = FarkasCertificate::new(lp, array![1.0, -1.0], 1.0e-9).unwrap();
 
         let result = certificate
-            .deletion_filter_iis(&lp, RevisedSimplexOptions::default(), 1.0e-9)
+            .deletion_filter_iis(RevisedSimplexOptions::default(), 1.0e-9)
             .unwrap();
 
         let IisResult::Infeasible(iis) = result else {

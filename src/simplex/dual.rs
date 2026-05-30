@@ -295,7 +295,7 @@ impl DualRevisedSimplex {
         &self,
         leaving: &LeavingBasicVariable,
     ) -> Result<Array1<f64>, StandardFormError> {
-        let row_multiplier = self.infeasibility_certificate(leaving).multiplier;
+        let row_multiplier = self.infeasibility_multiplier(leaving);
         Ok(self.lp.a().t().dot(&row_multiplier))
     }
 
@@ -317,12 +317,26 @@ impl DualRevisedSimplex {
     ///
     /// this $u$ is a Farkas certificate for infeasibility of
     /// $Ax=b,\ x\ge 0$.
-    pub fn infeasibility_certificate(&self, leaving: &LeavingBasicVariable) -> FarkasCertificate {
+    fn infeasibility_multiplier(&self, leaving: &LeavingBasicVariable) -> Array1<f64> {
         let mut unit = Array1::zeros(self.lp.a().nrows());
         unit[leaving.position] = 1.0;
-        FarkasCertificate {
-            multiplier: self.basis.solve_transposed(&unit),
-        }
+        self.basis.solve_transposed(&unit)
+    }
+
+    /// Build the Farkas certificate associated with a dual infeasible row.
+    ///
+    /// This is called after the dual ratio test has found no eligible entering
+    /// column, so the multiplier is known to prove primal infeasibility for
+    /// the stored LP.
+    pub fn infeasibility_certificate(
+        &self,
+        leaving: &LeavingBasicVariable,
+    ) -> Result<FarkasCertificate, StandardFormError> {
+        FarkasCertificate::new(
+            self.lp.clone(),
+            self.infeasibility_multiplier(leaving),
+            self.options.pivot_tolerance,
+        )
     }
 
     /// Select the entering column using the dual minimum ratio test.
@@ -423,7 +437,7 @@ impl DualRevisedSimplex {
                     return Ok(SolveResult::Optimal(self.current_solution(iteration)?));
                 }
                 Step::Infeasible { leaving, pivot_row } => {
-                    let certificate = self.infeasibility_certificate(&leaving);
+                    let certificate = self.infeasibility_certificate(&leaving)?;
                     return Ok(SolveResult::Infeasible {
                         leaving,
                         pivot_row,
@@ -872,9 +886,8 @@ mod tests {
                     }
                 );
                 assert_abs_diff_eq!(pivot_row, array![1.0, 1.0, 0.0], epsilon = 1.0e-9);
-                let verification = certificate
-                    .verify(simplex.lp(), 1.0e-9)
-                    .expect("certificate should have the right dimension");
+                assert_eq!(certificate.lp(), simplex.lp());
+                let verification = certificate.verify(1.0e-9);
                 assert!(
                     verification.valid,
                     "expected valid certificate, got {verification:?}"
