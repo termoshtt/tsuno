@@ -10,7 +10,7 @@ Simplex-based LP solver/analyzer for advanced usages.
 
 ## Current Status
 
-The current implementation is centered on standard-form LPs
+The current implementation is a standard-form LP solver/analyzer for
 
 ```text
 min c^T x
@@ -18,25 +18,24 @@ subject to A x = b
            x >= 0
 ```
 
-and provides the following pieces.
+It currently provides:
 
-- [x] Sparse LU factorization for basis matrices.
-- [x] Basis solves for `B x = rhs` and `B^T x = rhs`.
-- [x] Product-form eta updates for one-column basis replacement.
-- [x] Standard-form LP representation as `A`, `b`, and `c`.
-- [x] Basis-level simplex quantities:
+- Sparse LU factorization for basis matrices, including basis solves for
+  `B x = rhs` and `B^T x = rhs`.
+- Product-form eta updates for one-column basis replacement.
+- Standard-form LP representation as `A`, `b`, and `c`.
+- Basis-level revised simplex quantities:
   - basic solution `x_I = B^{-1} b`
   - basis costs `c_I`
   - dual variables `y = B^{-T} c_I`
   - reduced costs `r_j = c_j - A_j^T y`
-- [x] Primal revised simplex step and solve loop.
-- [x] Phase I auxiliary problem with artificial variables.
-- [x] `simplex::primal::solve` that runs Phase I and then Phase II.
-- [x] Structured simplex traces for solver paths and snapshot tests.
-- [x] Dual revised simplex step and solve loop for dual-feasible bases.
-- [x] Farkas certificates for infeasible standard-form LPs.
-- [x] Farkas-certificate-driven deletion-filter IIS construction for
-  standard-form row subsystems.
+- Primal revised simplex with Phase I feasible-basis construction and
+  `simplex::primal::solve`.
+- Dual revised simplex for dual-feasible initial bases.
+- Structured simplex traces for solver paths and snapshot tests.
+- Farkas certificates for infeasible standard-form LPs.
+- Certificate simplification by deletion filter; the support of a simplified
+  certificate gives a standard-form row IIS candidate.
 
 The LU update path currently uses eta updates. Forrest-Tomlin-style updates,
 stronger numerical pivoting, explicit refactorization, residual checks, and
@@ -45,8 +44,10 @@ kernel.
 
 ## Roadmap
 
-The project goal is to grow from a primal revised simplex implementation into
-an LP analysis toolkit that can also explain infeasibility.
+The next goal is to grow from a standard-form solver into an LP analysis toolkit
+for LPs supplied as OMMX instances. The solver can work on `StandardFormLp`, but
+diagnostics such as IIS need to be mapped back to OMMX constraint and variable
+identifiers.
 
 ### Sparse LU Kernel
 
@@ -70,32 +71,17 @@ simple and testable, but it is not the final performance target.
 - [ ] Benchmark factorization, solve, transposed solve, and update workloads
   across several sparsity levels.
 
-### Primal Revised Simplex
+### Simplex Methods
 
-- [x] Implement basis-level revised simplex operations.
-- [x] Implement Phase I feasible-basis construction.
-- [x] Implement top-level primal solve for standard-form LPs.
-- [x] Split primal-specific step types under `simplex::primal`.
 - [ ] Add optional fast paths for obvious feasible initial bases, such as slack
   bases, so top-level solve does not always need Phase I.
+- [ ] Add a top-level dual-simplex entry point that can construct or recover a
+  dual-feasible starting basis when useful.
+- [ ] Expand pivot selection strategies beyond the current deterministic rules.
+- [ ] Add more numerical termination checks around residuals and certificate
+  quality.
 
-### Dual Revised Simplex
-
-Dual simplex keeps dual feasibility and repairs primal infeasibility. It should
-reuse the existing basis, basis solve, transposed solve, reduced-cost, and trace
-infrastructure.
-
-- [x] Represent a dual revised simplex solver state.
-- [x] Select a leaving basis position from negative basic variables.
-- [x] Compute the pivot row via a transposed basis solve.
-- [x] Select an entering nonbasis column with the dual minimum ratio test.
-- [x] Implement one dual simplex pivot step.
-- [x] Place dual-specific step types under `simplex::dual`.
-- [x] Implement the dual simplex solve loop and result type.
-- [x] Share common basis-state and trace concepts with primal simplex where the
-  API remains clear.
-
-### Farkas Certificates
+### Certificates And IIS
 
 For the standard-form infeasible system
 
@@ -113,30 +99,36 @@ b^T y < 0
 
 which proves that no feasible `x >= 0` can satisfy `A x = b`.
 
-- [x] Add a `FarkasCertificate` type for standard-form LPs.
-- [x] Make `FarkasCertificate` own the LP it certifies and preserve the
-  certificate invariant at construction time.
-- [x] Add certificate support extraction for standard-form row indices.
-- [x] Return a certificate from Phase I infeasible results.
-- [x] Add tests that validate certificates produced by Phase I.
-- [x] Use deletion filter to simplify Farkas certificates.
+- [ ] Add richer certificate diagnostics for numerical quality without making
+  invalid certificates constructible.
+- [ ] Add stronger tests for certificate simplification across larger and
+  degenerate infeasible systems.
+- [ ] Return IIS results in terms of OMMX constraint identifiers through the
+  standardization map.
 
-### IIS Construction
+### OMMX Standardization
 
-An irreducible infeasible subsystem (IIS) is a minimal set of constraints that
-is already infeasible. This is an analysis feature rather than just a solver
-status, so it needs enough modeling information to explain infeasibility back
-to the caller.
+The project entry point should be an OMMX instance. Since the solver operates on
+standard-form LPs, conversion should standardize the instance immediately:
 
-- [x] Implement a deletion-filter IIS algorithm for standard-form row
-  subsystems.
-- [x] Represent IIS extraction as certificate simplification followed by
-  support extraction.
-- [x] Use Farkas certificates as infeasibility witnesses.
-- [x] Expose IIS construction as additional analysis from a Farkas certificate,
-  rather than as a direct operation on arbitrary LPs.
-- [ ] Preserve mappings from a higher-level LP into standard form.
-- [ ] Return IIS results in terms of the caller-facing constraint identifiers.
+```text
+OMMX Instance
+  -> StandardFormLp
+  + StandardizationMap
+```
+
+The map records how standard-form rows and columns came from the OMMX model, so
+certificates and IIS supports can be lifted back to caller-facing OMMX IDs.
+
+- [ ] Add an OMMX dependency and parse linear objectives, constraints, and
+  variable bounds from OMMX instances.
+- [ ] Convert OMMX LP data directly into `StandardFormLp`.
+- [ ] Define `StandardizationMap` for OMMX variable IDs, constraint IDs,
+  generated rows, and generated columns.
+- [ ] Preserve row provenance for inequalities, equalities, and bound-derived
+  constraints.
+- [ ] Lift Farkas certificates and simplified supports back to caller-facing
+  OMMX constraint identifiers.
 
 # License
 Copyright (c) 2026 Toshiki Teramura (@termoshtt)
