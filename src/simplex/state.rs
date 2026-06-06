@@ -113,6 +113,44 @@ impl RevisedSimplexState {
         Ok(Self { lp, ..self })
     }
 
+    #[katexit::katexit]
+    /// Replace a nonbasis column while keeping the current basis.
+    ///
+    /// If $j \notin I$, changing $A_j$ and $c_j$ does not change the basis
+    /// matrix $B=A_I$ or the current basic values $x_I = B^{-1}b$. It may
+    /// change the reduced cost of column $j$, so primal revised simplex can
+    /// reoptimize from the updated state. Callers must reject basis columns
+    /// before using this method.
+    pub(crate) fn replace_nonbasis_column(
+        self,
+        column: usize,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<Self, StandardFormError> {
+        let lp = self.lp.replace_column(column, values, cost)?;
+        Ok(Self { lp, ..self })
+    }
+
+    #[katexit::katexit]
+    /// Replace a column and rebuild the current basis representation.
+    ///
+    /// If $j \in I$, changing $A_j$ changes the basis matrix $B=A_I$. This
+    /// method updates the stored LP data and then rebuilds [`Basis`] from the
+    /// same basis index set against the updated matrix. It is a full
+    /// refactorization path rather than an eta update.
+    pub(crate) fn replace_column_and_refactor_basis(
+        self,
+        column: usize,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<Self, StandardFormError> {
+        let Self { lp, basis, options } = self;
+        let basis_indices = basis.indices().to_vec();
+        let lp = lp.replace_column(column, values, cost)?;
+        let basis = lp.basis(basis_indices)?;
+        Ok(Self { lp, basis, options })
+    }
+
     pub(crate) fn solve_basis_column(
         &self,
         column: usize,
