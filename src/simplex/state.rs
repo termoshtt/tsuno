@@ -88,7 +88,7 @@ impl RevisedSimplexState {
     ///
     /// changes the basic values $x_I = B^{-1}b$, but it does not change the
     /// basis matrix $B = A_I$ or the reduced costs because $A$ and $c$ are
-    /// unchanged. Therefore the LU representation inside [`Basis`] can be
+    /// unchanged. Therefore the basis representation inside [`Basis`] can be
     /// reused directly.
     pub fn replace_rhs(self, rhs: Array1<f64>) -> Result<Self, StandardFormError> {
         let lp = self.lp.replace_rhs(rhs)?;
@@ -106,7 +106,7 @@ impl RevisedSimplexState {
     ///
     /// changes the basis costs $c_I$, the dual variables $B^{-T}c_I$, and the
     /// reduced costs. It does not change $A$, $b$, or the basis matrix
-    /// $B=A_I$, so the basic values $x_I = B^{-1}b$ and the LU representation
+    /// $B=A_I$, so the basic values $x_I = B^{-1}b$ and the basis representation
     /// inside [`Basis`] can be reused directly.
     pub fn replace_cost(self, cost: Array1<f64>) -> Result<Self, StandardFormError> {
         let lp = self.lp.replace_cost(cost)?;
@@ -168,6 +168,56 @@ impl RevisedSimplexState {
     }
 
     #[katexit::katexit]
+    /// Add a less-than-or-equal constraint and use its slack as a new basis
+    /// variable.
+    ///
+    /// Adding
+    ///
+    /// $$
+    /// a^T x \le \beta
+    /// $$
+    ///
+    /// appends the standard-form row
+    ///
+    /// $$
+    /// a^T x + s = \beta,\qquad s \ge 0.
+    /// $$
+    ///
+    /// With the old basis $I$, the new basis is $I^+ = I \cup \{s\}$ and the
+    /// basis matrix has block form
+    ///
+    /// $$
+    /// B^+ =
+    /// \begin{bmatrix}
+    /// B & 0 \\
+    /// a_I^T & 1
+    /// \end{bmatrix}.
+    /// $$
+    ///
+    /// This keeps the old basis representation and stores only the row
+    /// coefficients $a_I$ needed for block solves.
+    pub(crate) fn add_less_equal_constraint_with_slack_basis(
+        self,
+        coefficients: Array1<f64>,
+        upper_bound: f64,
+    ) -> Result<(Self, usize), StandardFormError> {
+        let Self { lp, basis, options } = self;
+        if coefficients.len() != lp.a().ncols() {
+            return Err(StandardFormError::RowLengthMismatch {
+                expected: lp.a().ncols(),
+                actual: coefficients.len(),
+            });
+        }
+        let basis_row = Array1::from_iter(basis.indices().iter().map(|&index| coefficients[index]));
+        let (lp, slack_column) =
+            lp.add_less_equal_constraint_with_slack(coefficients, upper_bound)?;
+        let basis = basis
+            .extend_with_less_equal_slack(slack_column, basis_row)
+            .map_err(StandardFormError::Basis)?;
+        Ok((Self { lp, basis, options }, slack_column))
+    }
+
+    #[katexit::katexit]
     /// Remove a nonbasis column and remap the current basis indices.
     ///
     /// If $j \notin I$, removing $A_j$ does not change the basis matrix
@@ -216,7 +266,7 @@ impl RevisedSimplexState {
             let mut basis_indices = partial_basis.clone();
             basis_indices.insert(position, replacement);
             let basis = lp.basis(basis_indices)?;
-            if basis.lu().row_permutation().len() == lp.a().nrows() {
+            if basis.is_full_rank() {
                 return Ok(Some(Self { lp, basis, options }));
             }
         }

@@ -135,6 +135,10 @@ pub enum StandardFormError {
         expected: usize,
         actual: usize,
     },
+    RowLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
     BasisDimensionMismatch {
         expected: usize,
         actual: usize,
@@ -395,6 +399,65 @@ impl StandardFormLp {
         }
 
         Self::new(a, self.b, c)
+    }
+
+    #[katexit::katexit]
+    /// Add one less-than-or-equal constraint with a slack variable.
+    ///
+    /// For a row vector $a$ and upper bound $\beta$, this adds
+    ///
+    /// $$
+    /// a^T x \le \beta
+    /// $$
+    ///
+    /// by appending one equality row and one new slack column:
+    ///
+    /// $$
+    /// a^T x + s = \beta,\qquad s \ge 0.
+    /// $$
+    ///
+    /// The returned `usize` is the new slack column index. The slack cost is
+    /// zero, so an optimal basis can often be reused by adding this slack
+    /// column to the basis and running dual simplex only if the new slack value
+    /// is negative.
+    pub fn add_less_equal_constraint_with_slack(
+        self,
+        coefficients: Array1<f64>,
+        upper_bound: f64,
+    ) -> Result<(Self, usize), StandardFormError> {
+        if coefficients.len() != self.a.ncols() {
+            return Err(StandardFormError::RowLengthMismatch {
+                expected: self.a.ncols(),
+                actual: coefficients.len(),
+            });
+        }
+
+        let old_rows = self.a.nrows();
+        let old_cols = self.a.ncols();
+        let slack_column = old_cols;
+        let mut a = Array2::zeros((old_rows + 1, old_cols + 1));
+        for row in 0..old_rows {
+            for column in 0..old_cols {
+                a[(row, column)] = self.a[(row, column)];
+            }
+        }
+        for column in 0..old_cols {
+            a[(old_rows, column)] = coefficients[column];
+        }
+        a[(old_rows, slack_column)] = 1.0;
+
+        let mut b = Array1::zeros(old_rows + 1);
+        for row in 0..old_rows {
+            b[row] = self.b[row];
+        }
+        b[old_rows] = upper_bound;
+
+        let mut c = Array1::zeros(old_cols + 1);
+        for column in 0..old_cols {
+            c[column] = self.c[column];
+        }
+
+        Ok((Self { a, b, c }, slack_column))
     }
 
     #[katexit::katexit]
@@ -760,6 +823,32 @@ mod tests {
 
         assert_abs_diff_eq!(lp.a(), &array![[1.0, 4.0, 3.0], [5.0, 8.0, 7.0]]);
         assert_abs_diff_eq!(lp.c(), &array![11.0, 14.0, 13.0]);
+    }
+
+    #[test]
+    fn add_less_equal_constraint_with_slack_appends_row_and_slack_column() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0], [0.0, 1.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0],
+        )
+        .unwrap();
+
+        let (lp, slack_column) = lp
+            .add_less_equal_constraint_with_slack(array![2.0, 3.0, 0.0], 10.0)
+            .unwrap();
+
+        assert_eq!(slack_column, 3);
+        assert_abs_diff_eq!(
+            lp.a(),
+            &array![
+                [1.0, 0.0, 1.0, 0.0],
+                [0.0, 1.0, 1.0, 0.0],
+                [2.0, 3.0, 0.0, 1.0],
+            ]
+        );
+        assert_abs_diff_eq!(lp.b(), &array![4.0, 3.0, 10.0]);
+        assert_abs_diff_eq!(lp.c(), &array![1.0, 2.0, 0.0, 0.0]);
     }
 
     #[test]

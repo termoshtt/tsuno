@@ -172,7 +172,7 @@ pub fn solve_reusable(
 /// $$
 ///
 /// the [`StandardFormLp`] stores $A$, $b$, and $c$, while the [`Basis`] stores
-/// the current basis index set $I$ and an LU representation of $B = A_I$.
+/// the current basis index set $I$ and a representation of $B = A_I$.
 ///
 /// # Invariant
 ///

@@ -2,6 +2,8 @@ use ndarray::{Array1, Array2};
 
 use crate::lu::{LU, UpdateError};
 
+const BASIS_ETA_PIVOT_TOLERANCE: f64 = 1.0e-12;
+
 #[katexit::katexit]
 /// Basis matrix representation for a standard-form revised simplex method.
 ///
@@ -39,10 +41,14 @@ use crate::lu::{LU, UpdateError};
 /// \end{bmatrix}.
 /// $$
 ///
-/// This struct owns the index set $I$ as [`Basis::indices`] and an LU
-/// representation of `B`. It does not own the full constraint matrix `A`;
-/// callers are responsible for storing `A` and passing replacement columns
-/// from it.
+/// This struct owns the index set $I$ as [`Basis::indices`] and a basis
+/// representation that can apply $B^{-1}$ and $B^{-T}$ without explicitly
+/// forming either inverse. A freshly built basis stores a sparse LU
+/// factorization of $B$. Later operations may wrap that factorization with
+/// product-form eta updates or with block structure for a slack row added by a
+/// less-than-or-equal constraint. The type does not own the full constraint
+/// matrix `A`; callers are responsible for storing `A` and passing replacement
+/// columns from it.
 ///
 /// In the revised simplex method, the main operations provided by this type
 /// are:
@@ -68,13 +74,29 @@ use crate::lu::{LU, UpdateError};
 ///
 /// via [`Basis::replace_column`].
 ///
-/// The replacement is delegated to [`crate::lu::LU`] as a product-form eta
-/// update, so callers can continue solving with the updated basis without
-/// immediately rebuilding a fresh sparse LU factorization.
+/// Column replacement is stored as a product-form eta update, so callers can
+/// continue solving with the updated basis without immediately rebuilding a
+/// fresh sparse LU factorization.
 #[derive(Debug)]
 pub struct Basis {
     indices: Vec<usize>,
-    lu: LU,
+    representation: BasisRepresentation,
+    eta_updates: Vec<BasisEtaUpdate>,
+}
+
+#[derive(Debug)]
+enum BasisRepresentation {
+    Factorized(LU),
+    LessEqualSlack {
+        base: Box<Basis>,
+        basis_row: Array1<f64>,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct BasisEtaUpdate {
+    pivot: usize,
+    column: Array1<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,6 +108,7 @@ pub enum BasisError {
     CannotRemoveBasisColumn { column: usize },
     InvalidReplacementPosition { position: usize, dimension: usize },
     InvalidColumnLength { len: usize, expected: usize },
+    InvalidExtensionRowLength { len: usize, expected: usize },
     Update(UpdateError),
 }
 
@@ -96,7 +119,8 @@ impl Basis {
         let basis_matrix = basis_matrix(matrix, &indices);
         Ok(Self {
             indices,
-            lu: LU::from_dense(basis_matrix),
+            representation: BasisRepresentation::Factorized(LU::from_dense(basis_matrix)),
+            eta_updates: Vec::new(),
         })
     }
 
@@ -104,16 +128,30 @@ impl Basis {
         &self.indices
     }
 
-    pub fn lu(&self) -> &LU {
-        &self.lu
-    }
-
     pub fn solve(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        self.lu.solve(rhs)
+        assert_eq!(
+            rhs.len(),
+            self.dimension(),
+            "right-hand side length must match the basis dimension"
+        );
+        let mut solution = self.solve_base(rhs);
+        for eta_update in &self.eta_updates {
+            eta_update.apply_inverse(&mut solution);
+        }
+        solution
     }
 
     pub fn solve_transposed(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        self.lu.solve_transposed(rhs)
+        assert_eq!(
+            rhs.len(),
+            self.dimension(),
+            "right-hand side length must match the basis dimension"
+        );
+        let mut rhs = rhs.to_owned();
+        for eta_update in self.eta_updates.iter().rev() {
+            eta_update.apply_inverse_transposed(&mut rhs);
+        }
+        self.solve_base_transposed(&rhs)
     }
 
     /// Replace the `position`-th basis column by `column_index`.
@@ -139,15 +177,54 @@ impl Basis {
             });
         }
 
-        self.lu
-            .replace_column(position, new_column)
+        self.check_update_ready(position, new_column)
             .map_err(BasisError::Update)?;
+        let column = self.solve(new_column);
+        if column[position].abs() <= BASIS_ETA_PIVOT_TOLERANCE {
+            return Err(BasisError::Update(UpdateError::SmallEtaPivot {
+                pivot: position,
+                value: column[position],
+                tolerance: BASIS_ETA_PIVOT_TOLERANCE,
+            }));
+        }
+        self.eta_updates.push(BasisEtaUpdate {
+            pivot: position,
+            column,
+        });
         self.indices[position] = column_index;
         Ok(())
     }
 
     pub fn should_refactor(&self, max_updates: usize) -> bool {
-        self.lu.should_refactor(max_updates)
+        self.update_count() >= max_updates
+    }
+
+    pub(crate) fn is_full_rank(&self) -> bool {
+        self.rank() == self.dimension()
+    }
+
+    pub(crate) fn extend_with_less_equal_slack(
+        self,
+        slack_column: usize,
+        basis_row: Array1<f64>,
+    ) -> Result<Self, BasisError> {
+        if basis_row.len() != self.dimension() {
+            return Err(BasisError::InvalidExtensionRowLength {
+                len: basis_row.len(),
+                expected: self.dimension(),
+            });
+        }
+
+        let mut indices = self.indices.clone();
+        indices.push(slack_column);
+        Ok(Self {
+            indices,
+            representation: BasisRepresentation::LessEqualSlack {
+                base: Box::new(self),
+                basis_row,
+            },
+            eta_updates: Vec::new(),
+        })
     }
 
     pub(crate) fn remap_indices_after_swap_remove_column(
@@ -164,6 +241,139 @@ impl Basis {
             }
         }
         Ok(self)
+    }
+
+    fn dimension(&self) -> usize {
+        self.indices.len()
+    }
+
+    fn rank(&self) -> usize {
+        self.representation.rank()
+    }
+
+    fn update_count(&self) -> usize {
+        self.representation.update_count() + self.eta_updates.len()
+    }
+
+    fn solve_base(&self, rhs: &Array1<f64>) -> Array1<f64> {
+        self.representation.solve(rhs)
+    }
+
+    fn solve_base_transposed(&self, rhs: &Array1<f64>) -> Array1<f64> {
+        self.representation.solve_transposed(rhs)
+    }
+
+    fn check_update_ready(
+        &self,
+        pivot: usize,
+        new_column: &Array1<f64>,
+    ) -> Result<(), UpdateError> {
+        if self.rank() != self.dimension() {
+            return Err(UpdateError::RankDeficientFactorization {
+                rank: self.rank(),
+                dimension: self.dimension(),
+            });
+        }
+        if pivot >= self.dimension() {
+            return Err(UpdateError::PivotOutOfBounds {
+                pivot,
+                dimension: self.dimension(),
+            });
+        }
+        if new_column.len() != self.dimension() {
+            return Err(UpdateError::InvalidColumnLength {
+                len: new_column.len(),
+                expected: self.dimension(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl BasisRepresentation {
+    fn rank(&self) -> usize {
+        match self {
+            BasisRepresentation::Factorized(lu) => lu.row_permutation().len(),
+            BasisRepresentation::LessEqualSlack { base, .. } => base.rank() + 1,
+        }
+    }
+
+    fn update_count(&self) -> usize {
+        match self {
+            BasisRepresentation::Factorized(lu) => lu.update_count(),
+            BasisRepresentation::LessEqualSlack { base, .. } => base.update_count(),
+        }
+    }
+
+    fn solve(&self, rhs: &Array1<f64>) -> Array1<f64> {
+        match self {
+            BasisRepresentation::Factorized(lu) => lu.solve(rhs),
+            BasisRepresentation::LessEqualSlack { base, basis_row } => {
+                let base_dimension = base.dimension();
+                let base_rhs = Array1::from_iter(rhs.iter().take(base_dimension).copied());
+                let base_solution = base.solve(&base_rhs);
+                let slack_value = rhs[base_dimension] - basis_row.dot(&base_solution);
+                let mut solution = Array1::zeros(base_dimension + 1);
+                for (index, &value) in base_solution.iter().enumerate() {
+                    solution[index] = value;
+                }
+                solution[base_dimension] = slack_value;
+                solution
+            }
+        }
+    }
+
+    fn solve_transposed(&self, rhs: &Array1<f64>) -> Array1<f64> {
+        match self {
+            BasisRepresentation::Factorized(lu) => lu.solve_transposed(rhs),
+            BasisRepresentation::LessEqualSlack { base, basis_row } => {
+                let base_dimension = base.dimension();
+                let slack_rhs = rhs[base_dimension];
+                let base_rhs = Array1::from_iter(
+                    rhs.iter()
+                        .take(base_dimension)
+                        .zip(basis_row.iter())
+                        .map(|(&value, &row_value)| value - row_value * slack_rhs),
+                );
+                let base_solution = base.solve_transposed(&base_rhs);
+                let mut solution = Array1::zeros(base_dimension + 1);
+                for (index, &value) in base_solution.iter().enumerate() {
+                    solution[index] = value;
+                }
+                solution[base_dimension] = slack_rhs;
+                solution
+            }
+        }
+    }
+}
+
+impl BasisEtaUpdate {
+    fn apply_inverse(&self, vector: &mut Array1<f64>) {
+        debug_assert_eq!(vector.len(), self.column.len());
+
+        let pivot_value = self.column[self.pivot];
+        let pivot = vector[self.pivot] / pivot_value;
+        for index in 0..vector.len() {
+            if index != self.pivot {
+                vector[index] -= self.column[index] * pivot;
+            }
+        }
+        vector[self.pivot] = pivot;
+    }
+
+    fn apply_inverse_transposed(&self, vector: &mut Array1<f64>) {
+        debug_assert_eq!(vector.len(), self.column.len());
+
+        let pivot_value = self.column[self.pivot];
+        let off_pivot_dot = self
+            .column
+            .iter()
+            .zip(vector.iter())
+            .enumerate()
+            .filter(|(index, _)| *index != self.pivot)
+            .map(|(_, (column, value))| column * value)
+            .sum::<f64>();
+        vector[self.pivot] = (vector[self.pivot] - off_pivot_dot) / pivot_value;
     }
 }
 
@@ -261,6 +471,46 @@ mod tests {
         let solution = basis.solve(&rhs);
 
         assert_eq!(basis.indices(), &[1, 2, 3]);
+        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+        assert!(basis.should_refactor(1));
+    }
+
+    #[test]
+    fn basis_extends_less_equal_slack_and_solves_block_system() {
+        let matrix = array![[1.0, 0.0], [0.0, 1.0]];
+        let basis = Basis::new(&matrix, vec![0, 1])
+            .unwrap()
+            .extend_with_less_equal_slack(2, array![2.0, 3.0])
+            .unwrap();
+        let expected_solution = array![4.0, 5.0, 6.0];
+        let basis_matrix = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [2.0, 3.0, 1.0]];
+        let rhs = basis_matrix.dot(&expected_solution);
+
+        let solution = basis.solve(&rhs);
+        let transposed_rhs = basis_matrix.t().dot(&expected_solution);
+        let transposed_solution = basis.solve_transposed(&transposed_rhs);
+
+        assert_eq!(basis.indices(), &[0, 1, 2]);
+        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+        assert_abs_diff_eq!(transposed_solution, expected_solution, epsilon = 1.0e-9);
+    }
+
+    #[test]
+    fn basis_replaces_column_after_less_equal_slack_extension() {
+        let matrix = array![[1.0, 0.0, 1.0], [0.0, 1.0, 1.0]];
+        let mut basis = Basis::new(&matrix, vec![0, 1])
+            .unwrap()
+            .extend_with_less_equal_slack(3, array![2.0, 3.0])
+            .unwrap();
+        let replacement = array![1.0, 1.0, 4.0];
+        let expected_solution = array![2.0, 3.0, 5.0];
+        let basis_matrix = array![[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [2.0, 3.0, 4.0]];
+
+        basis.replace_column(2, 2, &replacement).unwrap();
+        let rhs = basis_matrix.dot(&expected_solution);
+        let solution = basis.solve(&rhs);
+
+        assert_eq!(basis.indices(), &[0, 1, 2]);
         assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
         assert!(basis.should_refactor(1));
     }

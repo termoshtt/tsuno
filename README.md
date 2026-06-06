@@ -97,7 +97,7 @@ API documentation is published from `cargo doc` on GitHub Pages:
 - `dual::DualRevisedSimplex` for stepping from an explicit dual-feasible basis.
 - `warm_start` and `SolvedSimplex` for reusing a basis after supported LP edits:
   replacing $b$, replacing $c$, replacing columns, adding columns, and removing
-  columns.
+  columns, plus adding less-than-or-equal constraints with slack variables.
 - `FarkasCertificate` for standard-form infeasibility proofs.
 - `FarkasCertificate::deletion_filter` for simplifying a certificate support
   into a smaller standard-form row subsystem.
@@ -108,6 +108,8 @@ API documentation is published from `cargo doc` on GitHub Pages:
 - Sparse LU factorization from COO data or dense `ndarray` matrices.
 - Basis solves for $B x = \mathrm{rhs}$ and $B^\top x = \mathrm{rhs}$.
 - Product-form eta updates for one-column basis replacement.
+- Block basis solves for adding less-than-or-equal constraints with a slack
+  basis variable.
 
 ## Current Limitations
 
@@ -146,6 +148,8 @@ For serious optimization work, use a maintained production solver instead.
 - [x] Reoptimize after replacing the right-hand side $b$.
 - [x] Reoptimize after replacing the objective $c$.
 - [x] Reoptimize after replacing, adding, or removing columns.
+- [x] Reoptimize after adding a less-than-or-equal constraint with a slack
+  basis variable.
 - [ ] Expand pivot selection strategies beyond the current deterministic rules.
 - [ ] Add stronger numerical termination checks around residuals and certificate
   quality.
