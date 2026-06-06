@@ -333,6 +333,71 @@ impl StandardFormLp {
     }
 
     #[katexit::katexit]
+    /// Append one constraint matrix column and its objective cost.
+    ///
+    /// This returns the LP with a new last column $A_j$ and cost $c_j$, where
+    /// $j$ is the returned column index. The new column must have one entry per
+    /// row of $A$.
+    pub fn add_column(
+        self,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<(Self, usize), StandardFormError> {
+        let column = self.a.ncols();
+        if values.len() != self.a.nrows() {
+            return Err(StandardFormError::ColumnLengthMismatch {
+                expected: self.a.nrows(),
+                actual: values.len(),
+            });
+        }
+
+        let mut a = Array2::zeros((self.a.nrows(), self.a.ncols() + 1));
+        for old_column in 0..self.a.ncols() {
+            a.column_mut(old_column).assign(&self.a.column(old_column));
+        }
+        a.column_mut(column).assign(&values);
+
+        let mut c = Array1::zeros(self.c.len() + 1);
+        for old_column in 0..self.c.len() {
+            c[old_column] = self.c[old_column];
+        }
+        c[column] = cost;
+
+        Ok((Self { a, b: self.b, c }, column))
+    }
+
+    #[katexit::katexit]
+    /// Remove one constraint matrix column and its objective cost.
+    ///
+    /// This returns the LP with column $j$ removed by moving the last column
+    /// into position $j$. All other column indices are unchanged. Callers that
+    /// own basis indices must remap the old last column index to $j$ when the
+    /// old last column is part of the basis.
+    pub fn remove_column(self, column: usize) -> Result<Self, StandardFormError> {
+        if column >= self.a.ncols() {
+            return Err(StandardFormError::ColumnOutOfBounds {
+                column,
+                ncols: self.a.ncols(),
+            });
+        }
+
+        let last_column = self.a.ncols() - 1;
+        let mut a = Array2::zeros((self.a.nrows(), self.a.ncols() - 1));
+        let mut c = Array1::zeros(self.c.len() - 1);
+        for target in 0..last_column {
+            let source = if target == column {
+                last_column
+            } else {
+                target
+            };
+            a.column_mut(target).assign(&self.a.column(source));
+            c[target] = self.c[source];
+        }
+
+        Self::new(a, self.b, c)
+    }
+
+    #[katexit::katexit]
     /// Return the row subsystem selected from the equality constraints.
     ///
     /// For a row index set
@@ -680,6 +745,21 @@ mod tests {
         assert_abs_diff_eq!(subsystem.a(), &array![[1.0, 1.0, 1.0], [1.0, 0.0, 0.0]]);
         assert_abs_diff_eq!(subsystem.b(), &array![3.0, 1.0]);
         assert_abs_diff_eq!(subsystem.c(), &array![4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn remove_column_moves_last_column_into_removed_position() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]],
+            array![9.0, 10.0],
+            array![11.0, 12.0, 13.0, 14.0],
+        )
+        .unwrap();
+
+        let lp = lp.remove_column(1).unwrap();
+
+        assert_abs_diff_eq!(lp.a(), &array![[1.0, 4.0, 3.0], [5.0, 8.0, 7.0]]);
+        assert_abs_diff_eq!(lp.c(), &array![11.0, 14.0, 13.0]);
     }
 
     #[test]

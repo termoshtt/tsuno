@@ -151,6 +151,79 @@ impl RevisedSimplexState {
         Ok(Self { lp, basis, options })
     }
 
+    #[katexit::katexit]
+    /// Add a nonbasis column while keeping the current basis.
+    ///
+    /// Appending a new column $A_j$ with cost $c_j$ does not change the current
+    /// basis matrix $B=A_I$, because the new column is not in $I$. It may have
+    /// negative reduced cost, so primal revised simplex can reoptimize from the
+    /// updated state. The returned `usize` is the new column index $j$.
+    pub(crate) fn add_nonbasis_column(
+        self,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<(Self, usize), StandardFormError> {
+        let (lp, column) = self.lp.add_column(values, cost)?;
+        Ok((Self { lp, ..self }, column))
+    }
+
+    #[katexit::katexit]
+    /// Remove a nonbasis column and remap the current basis indices.
+    ///
+    /// If $j \notin I$, removing $A_j$ does not change the basis matrix
+    /// $B=A_I$. The LP removes the column by moving the old last column into
+    /// position $j$, so only the old last column's basis index may need to be
+    /// remapped.
+    pub(crate) fn remove_nonbasis_column(self, column: usize) -> Result<Self, StandardFormError> {
+        let Self { lp, basis, options } = self;
+        let last_column = lp.a().ncols() - 1;
+        let lp = lp.remove_column(column)?;
+        let basis = basis
+            .remap_indices_after_swap_remove_column(column, last_column)
+            .map_err(StandardFormError::Basis)?;
+        Ok(Self { lp, basis, options })
+    }
+
+    #[katexit::katexit]
+    /// Remove a basis column and try to repair the basis by refactorization.
+    ///
+    /// If $j \in I$, removing $A_j$ removes one column from $B=A_I$. This
+    /// method removes the column from the LP, remaps any remaining basis column
+    /// moved by the swap-remove operation, and searches for a replacement
+    /// column for the removed basis position. Each candidate basis is rebuilt
+    /// from the updated matrix; the first full-rank candidate is returned.
+    pub(crate) fn remove_basis_column_and_refactor(
+        self,
+        column: usize,
+    ) -> Result<Option<Self>, StandardFormError> {
+        let Self { lp, basis, options } = self;
+        let Some(position) = basis.indices().iter().position(|&index| index == column) else {
+            let state = Self { lp, basis, options };
+            return state.remove_nonbasis_column(column).map(Some);
+        };
+        let last_column = lp.a().ncols() - 1;
+        let partial_basis = remap_basis_indices_after_swap_remove_without_removed(
+            basis.indices(),
+            column,
+            last_column,
+        );
+        let lp = lp.remove_column(column)?;
+
+        for replacement in 0..lp.a().ncols() {
+            if partial_basis.contains(&replacement) {
+                continue;
+            }
+            let mut basis_indices = partial_basis.clone();
+            basis_indices.insert(position, replacement);
+            let basis = lp.basis(basis_indices)?;
+            if basis.lu().row_permutation().len() == lp.a().nrows() {
+                return Ok(Some(Self { lp, basis, options }));
+            }
+        }
+
+        Ok(None)
+    }
+
     pub(crate) fn solve_basis_column(
         &self,
         column: usize,
@@ -187,4 +260,23 @@ fn full_primal_solution(
         primal[column] = value;
     }
     primal
+}
+
+fn remap_basis_indices_after_swap_remove_without_removed(
+    indices: &[usize],
+    column: usize,
+    last_column: usize,
+) -> Vec<usize> {
+    indices
+        .iter()
+        .filter_map(|&index| {
+            if index == column {
+                None
+            } else if index == last_column {
+                Some(column)
+            } else {
+                Some(index)
+            }
+        })
+        .collect()
 }

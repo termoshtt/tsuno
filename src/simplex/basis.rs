@@ -83,6 +83,7 @@ pub enum BasisError {
     TooFewColumns { nrows: usize, ncols: usize },
     BasisSizeMismatch { expected: usize, actual: usize },
     ColumnOutOfBounds { column: usize, ncols: usize },
+    CannotRemoveBasisColumn { column: usize },
     InvalidReplacementPosition { position: usize, dimension: usize },
     InvalidColumnLength { len: usize, expected: usize },
     Update(UpdateError),
@@ -147,6 +148,22 @@ impl Basis {
 
     pub fn should_refactor(&self, max_updates: usize) -> bool {
         self.lu.should_refactor(max_updates)
+    }
+
+    pub(crate) fn remap_indices_after_swap_remove_column(
+        mut self,
+        column: usize,
+        last_column: usize,
+    ) -> Result<Self, BasisError> {
+        if self.indices.contains(&column) {
+            return Err(BasisError::CannotRemoveBasisColumn { column });
+        }
+        for index in &mut self.indices {
+            if *index == last_column {
+                *index = column;
+            }
+        }
+        Ok(self)
     }
 }
 
@@ -246,6 +263,32 @@ mod tests {
         assert_eq!(basis.indices(), &[1, 2, 3]);
         assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
         assert!(basis.should_refactor(1));
+    }
+
+    #[test]
+    fn basis_remaps_indices_after_nonbasis_column_swap_removal() {
+        let matrix = array![
+            [1.0, 2.0, 0.0, 0.0],
+            [0.0, 0.0, 3.0, 4.0],
+            [5.0, 0.0, 0.0, 6.0],
+        ];
+        let basis = Basis::new(&matrix, vec![1, 2, 3]).unwrap();
+
+        let basis = basis.remap_indices_after_swap_remove_column(0, 3).unwrap();
+
+        assert_eq!(basis.indices(), &[1, 2, 0]);
+    }
+
+    #[test]
+    fn basis_rejects_removing_basis_column() {
+        let matrix = array![[1.0, 0.0], [0.0, 1.0]];
+        let basis = Basis::new(&matrix, vec![0, 1]).unwrap();
+
+        let error = basis
+            .remap_indices_after_swap_remove_column(1, 1)
+            .unwrap_err();
+
+        assert_eq!(error, BasisError::CannotRemoveBasisColumn { column: 1 });
     }
 
     #[test]
