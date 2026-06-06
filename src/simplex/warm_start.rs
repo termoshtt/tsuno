@@ -218,8 +218,10 @@ impl SolvedSimplex {
     /// Remove one original column and reoptimize immediately.
     ///
     /// The caller specifies the original column index $j$. If $j \notin I$,
-    /// the basis matrix is unchanged and only later column indices are remapped.
-    /// This method then runs primal revised simplex from the updated state.
+    /// the basis matrix is unchanged. The LP removes the column by moving the
+    /// old last column into position $j$, so this method remaps the basis index
+    /// only when that old last column was basic. It then runs primal revised
+    /// simplex from the updated state.
     ///
     /// If $j \in I$, the basis matrix loses one column. This method removes
     /// the column, searches for a replacement basis column in the updated LP,
@@ -603,8 +605,8 @@ mod tests {
         let SimplexResult::Optimal(solution) = resolved.result() else {
             panic!("expected optimal reoptimized result");
         };
-        assert_eq!(solution.basis_indices, vec![1, 2]);
-        assert_eq!(solution.primal, array![0.0, 4.0, 3.0]);
+        assert_eq!(solution.basis_indices, vec![2, 0]);
+        assert_eq!(solution.primal, array![3.0, 0.0, 4.0]);
         assert_eq!(resolved.state().lp().a().ncols(), 3);
     }
 

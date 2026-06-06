@@ -171,13 +171,16 @@ impl RevisedSimplexState {
     /// Remove a nonbasis column and remap the current basis indices.
     ///
     /// If $j \notin I$, removing $A_j$ does not change the basis matrix
-    /// $B=A_I$. The column numbering changes, so every basis index greater than
-    /// $j$ is decremented in the updated LP.
+    /// $B=A_I$. The LP removes the column by moving the old last column into
+    /// position $j$, so only the old last column's basis index may need to be
+    /// remapped.
     pub(crate) fn remove_nonbasis_column(self, column: usize) -> Result<Self, StandardFormError> {
         let Self { lp, basis, options } = self;
-        let basis_indices = remap_basis_indices_after_column_removal(basis.indices(), column);
+        let last_column = lp.a().ncols() - 1;
         let lp = lp.remove_column(column)?;
-        let basis = lp.basis(basis_indices)?;
+        let basis = basis
+            .remap_indices_after_swap_remove_column(column, last_column)
+            .map_err(StandardFormError::Basis)?;
         Ok(Self { lp, basis, options })
     }
 
@@ -185,10 +188,10 @@ impl RevisedSimplexState {
     /// Remove a basis column and try to repair the basis by refactorization.
     ///
     /// If $j \in I$, removing $A_j$ removes one column from $B=A_I$. This
-    /// method removes the column from the LP, keeps the remaining basis columns
-    /// in their current order, and searches for a replacement column for the
-    /// removed basis position. Each candidate basis is rebuilt from the updated
-    /// matrix; the first full-rank candidate is returned.
+    /// method removes the column from the LP, remaps any remaining basis column
+    /// moved by the swap-remove operation, and searches for a replacement
+    /// column for the removed basis position. Each candidate basis is rebuilt
+    /// from the updated matrix; the first full-rank candidate is returned.
     pub(crate) fn remove_basis_column_and_refactor(
         self,
         column: usize,
@@ -198,8 +201,12 @@ impl RevisedSimplexState {
             let state = Self { lp, basis, options };
             return state.remove_nonbasis_column(column).map(Some);
         };
-        let partial_basis =
-            remap_basis_indices_after_column_removal_without_removed(basis.indices(), column);
+        let last_column = lp.a().ncols() - 1;
+        let partial_basis = remap_basis_indices_after_swap_remove_without_removed(
+            basis.indices(),
+            column,
+            last_column,
+        );
         let lp = lp.remove_column(column)?;
 
         for replacement in 0..lp.a().ncols() {
@@ -255,24 +262,18 @@ fn full_primal_solution(
     primal
 }
 
-fn remap_basis_indices_after_column_removal(indices: &[usize], column: usize) -> Vec<usize> {
-    indices
-        .iter()
-        .map(|&index| if index > column { index - 1 } else { index })
-        .collect()
-}
-
-fn remap_basis_indices_after_column_removal_without_removed(
+fn remap_basis_indices_after_swap_remove_without_removed(
     indices: &[usize],
     column: usize,
+    last_column: usize,
 ) -> Vec<usize> {
     indices
         .iter()
         .filter_map(|&index| {
             if index == column {
                 None
-            } else if index > column {
-                Some(index - 1)
+            } else if index == last_column {
+                Some(column)
             } else {
                 Some(index)
             }
