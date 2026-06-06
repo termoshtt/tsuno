@@ -333,6 +333,69 @@ impl StandardFormLp {
     }
 
     #[katexit::katexit]
+    /// Append one constraint matrix column and its objective cost.
+    ///
+    /// This returns the LP with a new last column $A_j$ and cost $c_j$, where
+    /// $j$ is the returned column index. The new column must have one entry per
+    /// row of $A$.
+    pub fn add_column(
+        self,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<(Self, usize), StandardFormError> {
+        let column = self.a.ncols();
+        if values.len() != self.a.nrows() {
+            return Err(StandardFormError::ColumnLengthMismatch {
+                expected: self.a.nrows(),
+                actual: values.len(),
+            });
+        }
+
+        let mut a = Array2::zeros((self.a.nrows(), self.a.ncols() + 1));
+        for old_column in 0..self.a.ncols() {
+            a.column_mut(old_column).assign(&self.a.column(old_column));
+        }
+        a.column_mut(column).assign(&values);
+
+        let mut c = Array1::zeros(self.c.len() + 1);
+        for old_column in 0..self.c.len() {
+            c[old_column] = self.c[old_column];
+        }
+        c[column] = cost;
+
+        Ok((Self { a, b: self.b, c }, column))
+    }
+
+    #[katexit::katexit]
+    /// Remove one constraint matrix column and its objective cost.
+    ///
+    /// This returns the LP with column $j$ removed. Columns after $j$ shift left
+    /// by one, so callers that own basis indices must remap every index
+    /// greater than $j$ to one less than its previous value.
+    pub fn remove_column(self, column: usize) -> Result<Self, StandardFormError> {
+        if column >= self.a.ncols() {
+            return Err(StandardFormError::ColumnOutOfBounds {
+                column,
+                ncols: self.a.ncols(),
+            });
+        }
+
+        let mut a = Array2::zeros((self.a.nrows(), self.a.ncols() - 1));
+        let mut c = Array1::zeros(self.c.len() - 1);
+        let mut target = 0;
+        for source in 0..self.a.ncols() {
+            if source == column {
+                continue;
+            }
+            a.column_mut(target).assign(&self.a.column(source));
+            c[target] = self.c[source];
+            target += 1;
+        }
+
+        Self::new(a, self.b, c)
+    }
+
+    #[katexit::katexit]
     /// Return the row subsystem selected from the equality constraints.
     ///
     /// For a row index set

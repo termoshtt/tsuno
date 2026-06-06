@@ -39,6 +39,7 @@ pub enum ReoptimizationError {
     WarmStart(WarmStartError),
     Primal(PrimalSimplexError),
     Dual(DualSimplexError),
+    NoReplacementBasisAfterColumnRemoval { column: usize },
     Simplex(SimplexError),
 }
 
@@ -178,6 +179,65 @@ impl SolvedSimplex {
         }
 
         let state = self.state.replace_nonbasis_column(column, values, cost)?;
+        let mut simplex = RevisedSimplex::from_state(state)?;
+        let result = simplex.solve(trace)?;
+        let state = simplex.into_state();
+        Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
+    }
+
+    #[katexit::katexit]
+    /// Add a new original column and reoptimize immediately.
+    ///
+    /// Appending a column creates a new nonbasis variable. The current basis
+    /// matrix $B=A_I$ and basic values are unchanged:
+    ///
+    /// $$
+    /// x_I = B^{-1}b.
+    /// $$
+    ///
+    /// The new column may have negative reduced cost, so this method runs
+    /// primal revised simplex from the updated state. The returned `usize` is
+    /// the new column index.
+    pub fn reoptimize_with_added_column(
+        self,
+        values: Array1<f64>,
+        cost: f64,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<(Self, usize), ReoptimizationError> {
+        let (state, column) = self.state.add_nonbasis_column(values, cost)?;
+        let mut simplex = RevisedSimplex::from_state(state)?;
+        let result = simplex.solve(trace)?;
+        let state = simplex.into_state();
+        Ok((
+            SolvedSimplex::new(state, SimplexResult::from(result)),
+            column,
+        ))
+    }
+
+    #[katexit::katexit]
+    /// Remove one original column and reoptimize immediately.
+    ///
+    /// The caller specifies the original column index $j$. If $j \notin I$,
+    /// the basis matrix is unchanged and only later column indices are remapped.
+    /// This method then runs primal revised simplex from the updated state.
+    ///
+    /// If $j \in I$, the basis matrix loses one column. This method removes
+    /// the column, searches for a replacement basis column in the updated LP,
+    /// refactorizes the repaired basis, and then chooses primal or dual revised
+    /// simplex according to the repaired state's invariant.
+    pub fn reoptimize_without_column(
+        self,
+        column: usize,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<Self, ReoptimizationError> {
+        if self.state.basis().indices().contains(&column) {
+            let Some(state) = self.state.remove_basis_column_and_refactor(column)? else {
+                return Err(ReoptimizationError::NoReplacementBasisAfterColumnRemoval { column });
+            };
+            return WarmStart::from_state(state)?.solve_reusable(trace);
+        }
+
+        let state = self.state.remove_nonbasis_column(column)?;
         let mut simplex = RevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
@@ -492,5 +552,84 @@ mod tests {
         assert_eq!(solution.basis_indices, vec![0, 3]);
         assert_eq!(solution.primal, array![4.0, 0.0, 0.0, 3.0]);
         assert_eq!(resolved.state().lp().a().column(2), array![-1.0, 0.0]);
+    }
+
+    #[test]
+    fn solved_simplex_reoptimizes_after_column_addition() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+
+        let (resolved, column) = solved
+            .reoptimize_with_added_column(array![1.0, 1.0], -1.0, &mut trace)
+            .unwrap();
+
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(column, 4);
+        assert_eq!(solution.basis_indices, vec![2, 4]);
+        assert_eq!(solution.primal, array![0.0, 0.0, 1.0, 0.0, 3.0]);
+        assert_eq!(resolved.state().lp().a().column(column), array![1.0, 1.0]);
+        assert_eq!(resolved.state().lp().c()[column], -1.0);
+    }
+
+    #[test]
+    fn solved_simplex_reoptimizes_after_nonbasis_column_removal() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+
+        let resolved = solved.reoptimize_without_column(0, &mut trace).unwrap();
+
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(solution.basis_indices, vec![1, 2]);
+        assert_eq!(solution.primal, array![0.0, 4.0, 3.0]);
+        assert_eq!(resolved.state().lp().a().ncols(), 3);
+    }
+
+    #[test]
+    fn solved_simplex_repairs_basis_after_basis_column_removal() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+
+        let resolved = solved.reoptimize_without_column(2, &mut trace).unwrap();
+
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(solution.basis_indices, vec![0, 2]);
+        assert_eq!(solution.primal, array![4.0, 0.0, 3.0]);
+        assert_eq!(resolved.state().lp().a().ncols(), 3);
     }
 }
