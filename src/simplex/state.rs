@@ -113,6 +113,24 @@ impl RevisedSimplexState {
         Ok(Self { lp, ..self })
     }
 
+    #[katexit::katexit]
+    /// Replace a nonbasis column while keeping the current basis.
+    ///
+    /// If $j \notin I$, changing $A_j$ and $c_j$ does not change the basis
+    /// matrix $B=A_I$ or the current basic values $x_I = B^{-1}b$. It may
+    /// change the reduced cost of column $j$, so primal revised simplex can
+    /// reoptimize from the updated state. Callers must reject basis columns
+    /// before using this method.
+    pub(crate) fn replace_nonbasis_column(
+        self,
+        column: usize,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<Self, StandardFormError> {
+        let lp = self.lp.replace_column(column, values, cost)?;
+        Ok(Self { lp, ..self })
+    }
+
     pub(crate) fn solve_basis_column(
         &self,
         column: usize,

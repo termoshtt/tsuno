@@ -39,6 +39,7 @@ pub enum ReoptimizationError {
     WarmStart(WarmStartError),
     Primal(PrimalSimplexError),
     Dual(DualSimplexError),
+    BasisColumnUpdateUnsupported { column: usize },
     Simplex(SimplexError),
 }
 
@@ -136,6 +137,42 @@ impl SolvedSimplex {
         trace: &mut impl SimplexTrace,
     ) -> Result<Self, ReoptimizationError> {
         let state = self.state.replace_cost(cost)?;
+        let mut simplex = RevisedSimplex::from_state(state)?;
+        let result = simplex.solve(trace)?;
+        let state = simplex.into_state();
+        Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
+    }
+
+    #[katexit::katexit]
+    /// Replace one original column and reoptimize immediately.
+    ///
+    /// The caller only specifies the original column index $j$, the new
+    /// constraint column $A_j$, and the new cost $c_j$. This method checks
+    /// whether $j$ is currently in the basis.
+    ///
+    /// If $j \notin I$, the basis matrix $B=A_I$ is unchanged, so the current
+    /// basic values remain primal-feasible:
+    ///
+    /// $$
+    /// x_I = B^{-1}b.
+    /// $$
+    ///
+    /// The changed column may have a new reduced cost, so this method runs
+    /// primal revised simplex from the updated state. If $j \in I$, updating
+    /// the column would change $B$ itself; that case will require basis repair
+    /// or refactorization and is currently reported as unsupported.
+    pub fn reoptimize_with_column(
+        self,
+        column: usize,
+        values: Array1<f64>,
+        cost: f64,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<Self, ReoptimizationError> {
+        if self.state.basis().indices().contains(&column) {
+            return Err(ReoptimizationError::BasisColumnUpdateUnsupported { column });
+        }
+
+        let state = self.state.replace_nonbasis_column(column, values, cost)?;
         let mut simplex = RevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
@@ -391,5 +428,62 @@ mod tests {
         assert_eq!(solution.basis_indices, vec![0, 1]);
         assert_eq!(solution.primal, array![4.0, 3.0, 0.0, 0.0]);
         assert_eq!(resolved.state().lp().c(), &array![-1.0, -2.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn solved_simplex_reoptimizes_after_nonbasis_column_replacement() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+        let SimplexResult::Optimal(solution) = solved.result() else {
+            panic!("expected initial optimal result");
+        };
+        assert_eq!(solution.basis_indices, vec![2, 3]);
+
+        let resolved = solved
+            .reoptimize_with_column(0, array![1.0, 1.0], -1.0, &mut trace)
+            .unwrap();
+
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(solution.basis_indices, vec![2, 0]);
+        assert_eq!(solution.primal, array![3.0, 0.0, 1.0, 0.0]);
+        assert_eq!(resolved.state().lp().a().column(0), array![1.0, 1.0]);
+        assert_eq!(resolved.state().lp().c()[0], -1.0);
+    }
+
+    #[test]
+    fn solved_simplex_rejects_basis_column_replacement_until_repair_is_supported() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+
+        let error = solved
+            .reoptimize_with_column(2, array![1.0, 0.0], 0.0, &mut trace)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            ReoptimizationError::BasisColumnUpdateUnsupported { column: 2 }
+        );
     }
 }

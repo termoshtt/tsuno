@@ -131,6 +131,10 @@ pub enum StandardFormError {
         expected: usize,
         actual: usize,
     },
+    ColumnLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
     BasisDimensionMismatch {
         expected: usize,
         actual: usize,
@@ -294,6 +298,38 @@ impl StandardFormLp {
     /// reoptimization.
     pub fn replace_cost(self, c: Array1<f64>) -> Result<Self, StandardFormError> {
         Self::new(self.a, self.b, c)
+    }
+
+    #[katexit::katexit]
+    /// Replace one constraint matrix column and its objective cost.
+    ///
+    /// For a column index $j$, this returns the LP with $A_j$ and $c_j$
+    /// replaced while all other columns, costs, and the right-hand side are
+    /// unchanged. The new column must have one entry per row of $A$.
+    pub fn replace_column(
+        self,
+        column: usize,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<Self, StandardFormError> {
+        if column >= self.a.ncols() {
+            return Err(StandardFormError::ColumnOutOfBounds {
+                column,
+                ncols: self.a.ncols(),
+            });
+        }
+        if values.len() != self.a.nrows() {
+            return Err(StandardFormError::ColumnLengthMismatch {
+                expected: self.a.nrows(),
+                actual: values.len(),
+            });
+        }
+
+        let mut a = self.a;
+        let mut c = self.c;
+        a.column_mut(column).assign(&values);
+        c[column] = cost;
+        Ok(Self { a, b: self.b, c })
     }
 
     #[katexit::katexit]
