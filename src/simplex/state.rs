@@ -131,6 +131,26 @@ impl RevisedSimplexState {
         Ok(Self { lp, ..self })
     }
 
+    #[katexit::katexit]
+    /// Replace a column and rebuild the current basis representation.
+    ///
+    /// If $j \in I$, changing $A_j$ changes the basis matrix $B=A_I$. This
+    /// method updates the stored LP data and then rebuilds [`Basis`] from the
+    /// same basis index set against the updated matrix. It is a full
+    /// refactorization path rather than an eta update.
+    pub(crate) fn replace_column_and_refactor_basis(
+        self,
+        column: usize,
+        values: Array1<f64>,
+        cost: f64,
+    ) -> Result<Self, StandardFormError> {
+        let Self { lp, basis, options } = self;
+        let basis_indices = basis.indices().to_vec();
+        let lp = lp.replace_column(column, values, cost)?;
+        let basis = lp.basis(basis_indices)?;
+        Ok(Self { lp, basis, options })
+    }
+
     pub(crate) fn solve_basis_column(
         &self,
         column: usize,

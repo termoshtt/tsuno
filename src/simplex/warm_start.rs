@@ -39,7 +39,6 @@ pub enum ReoptimizationError {
     WarmStart(WarmStartError),
     Primal(PrimalSimplexError),
     Dual(DualSimplexError),
-    BasisColumnUpdateUnsupported { column: usize },
     Simplex(SimplexError),
 }
 
@@ -158,9 +157,12 @@ impl SolvedSimplex {
     /// $$
     ///
     /// The changed column may have a new reduced cost, so this method runs
-    /// primal revised simplex from the updated state. If $j \in I$, updating
-    /// the column would change $B$ itself; that case will require basis repair
-    /// or refactorization and is currently reported as unsupported.
+    /// primal revised simplex from the updated state.
+    ///
+    /// If $j \in I$, updating the column changes $B$ itself. In that case this
+    /// method rebuilds the basis representation from the updated matrix and
+    /// then chooses primal or dual revised simplex according to the rebuilt
+    /// state's invariant.
     pub fn reoptimize_with_column(
         self,
         column: usize,
@@ -169,7 +171,10 @@ impl SolvedSimplex {
         trace: &mut impl SimplexTrace,
     ) -> Result<Self, ReoptimizationError> {
         if self.state.basis().indices().contains(&column) {
-            return Err(ReoptimizationError::BasisColumnUpdateUnsupported { column });
+            let state = self
+                .state
+                .replace_column_and_refactor_basis(column, values, cost)?;
+            return WarmStart::from_state(state)?.solve_reusable(trace);
         }
 
         let state = self.state.replace_nonbasis_column(column, values, cost)?;
@@ -463,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn solved_simplex_rejects_basis_column_replacement_until_repair_is_supported() {
+    fn solved_simplex_reoptimizes_after_basis_column_replacement() {
         let lp = StandardFormLp::new(
             array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
             array![4.0, 3.0],
@@ -477,13 +482,15 @@ mod tests {
             panic!("expected reusable solved state");
         };
 
-        let error = solved
-            .reoptimize_with_column(2, array![1.0, 0.0], 0.0, &mut trace)
-            .unwrap_err();
+        let resolved = solved
+            .reoptimize_with_column(2, array![-1.0, 0.0], 0.0, &mut trace)
+            .unwrap();
 
-        assert_eq!(
-            error,
-            ReoptimizationError::BasisColumnUpdateUnsupported { column: 2 }
-        );
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(solution.basis_indices, vec![0, 3]);
+        assert_eq!(solution.primal, array![4.0, 0.0, 0.0, 3.0]);
+        assert_eq!(resolved.state().lp().a().column(2), array![-1.0, 0.0]);
     }
 }
