@@ -80,6 +80,11 @@ fn main() {
 }
 ```
 
+## Documentation
+
+API documentation is published from `cargo doc` on GitHub Pages:
+<https://termoshtt.github.io/tsuno/>
+
 ## Current Features
 
 ### `tsuno::simplex`
