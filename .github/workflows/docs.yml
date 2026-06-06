@@ -34,8 +34,6 @@ jobs:
           <title>tsuno documentation</title>
           <p>Redirecting to <a href="tsuno/">tsuno documentation</a>.</p>
           HTML
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
       - name: Upload documentation artifact
         uses: actions/upload-pages-artifact@v4
         with:
