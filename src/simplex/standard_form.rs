@@ -277,6 +277,26 @@ impl StandardFormLp {
     }
 
     #[katexit::katexit]
+    /// Replace the objective cost vector.
+    ///
+    /// For
+    ///
+    /// $$
+    /// \min c^T x
+    /// \quad \text{s.t.} \quad
+    /// A x = b,\quad x \ge 0,
+    /// $$
+    ///
+    /// this returns the LP with the same constraint matrix $A$ and
+    /// right-hand side $b$, but with a new cost vector. This operation
+    /// preserves the basis matrix $B = A_I$ and the current basic values
+    /// $x_I = B^{-1}b$, so a primal-feasible basis remains primal feasible for
+    /// reoptimization.
+    pub fn replace_cost(self, c: Array1<f64>) -> Result<Self, StandardFormError> {
+        Self::new(self.a, self.b, c)
+    }
+
+    #[katexit::katexit]
     /// Return the row subsystem selected from the equality constraints.
     ///
     /// For a row index set

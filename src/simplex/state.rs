@@ -95,6 +95,24 @@ impl RevisedSimplexState {
         Ok(Self { lp, ..self })
     }
 
+    #[katexit::katexit]
+    /// Replace the stored cost vector while keeping the current basis.
+    ///
+    /// Changing $c$ in
+    ///
+    /// $$
+    /// \min c^T x
+    /// $$
+    ///
+    /// changes the basis costs $c_I$, the dual variables $B^{-T}c_I$, and the
+    /// reduced costs. It does not change $A$, $b$, or the basis matrix
+    /// $B=A_I$, so the basic values $x_I = B^{-1}b$ and the LU representation
+    /// inside [`Basis`] can be reused directly.
+    pub fn replace_cost(self, cost: Array1<f64>) -> Result<Self, StandardFormError> {
+        let lp = self.lp.replace_cost(cost)?;
+        Ok(Self { lp, ..self })
+    }
+
     pub(crate) fn solve_basis_column(
         &self,
         column: usize,

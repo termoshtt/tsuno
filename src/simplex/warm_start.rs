@@ -37,6 +37,7 @@ pub struct SolvedSimplex {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReoptimizationError {
     WarmStart(WarmStartError),
+    Primal(PrimalSimplexError),
     Dual(DualSimplexError),
     Simplex(SimplexError),
 }
@@ -50,6 +51,12 @@ impl From<WarmStartError> for ReoptimizationError {
 impl From<SimplexError> for ReoptimizationError {
     fn from(error: SimplexError) -> Self {
         ReoptimizationError::Simplex(error)
+    }
+}
+
+impl From<PrimalSimplexError> for ReoptimizationError {
+    fn from(error: PrimalSimplexError) -> Self {
+        ReoptimizationError::Primal(error)
     }
 }
 
@@ -95,9 +102,8 @@ impl SolvedSimplex {
     /// x_I = B^{-1} b
     /// $$
     ///
-    /// may become negative, so this method rebuilds the warm-start wrapper from
-    /// the updated state and runs the appropriate simplex method before
-    /// returning another [`SolvedSimplex`].
+    /// may become negative, so this method runs dual revised simplex from the
+    /// updated state before returning another [`SolvedSimplex`].
     pub fn reoptimize_with_rhs(
         self,
         rhs: Array1<f64>,
@@ -105,6 +111,32 @@ impl SolvedSimplex {
     ) -> Result<Self, ReoptimizationError> {
         let state = self.state.replace_rhs(rhs)?;
         let mut simplex = DualRevisedSimplex::from_state(state)?;
+        let result = simplex.solve(trace)?;
+        let state = simplex.into_state();
+        Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
+    }
+
+    #[katexit::katexit]
+    /// Replace the objective cost vector and reoptimize immediately.
+    ///
+    /// Changing only $c$ preserves the current basic values because $A$, $b$,
+    /// and $B=A_I$ are unchanged:
+    ///
+    /// $$
+    /// x_I = B^{-1}b.
+    /// $$
+    ///
+    /// Therefore a previously primal-feasible terminal state remains
+    /// primal-feasible. The dual variables and reduced costs can change, so
+    /// this method runs primal revised simplex from the updated state before
+    /// returning another [`SolvedSimplex`].
+    pub fn reoptimize_with_cost(
+        self,
+        cost: Array1<f64>,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<Self, ReoptimizationError> {
+        let state = self.state.replace_cost(cost)?;
+        let mut simplex = RevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
         Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
@@ -327,5 +359,37 @@ mod tests {
         assert_eq!(solution.basis_indices, vec![1, 2]);
         assert_eq!(solution.primal, array![0.0, 1.0, 0.0]);
         assert_eq!(resolved.state().lp().b(), &array![-1.0, 1.0]);
+    }
+
+    #[test]
+    fn solved_simplex_reoptimizes_after_cost_replacement() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![1.0, 2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+        let SimplexResult::Optimal(solution) = solved.result() else {
+            panic!("expected initial optimal result");
+        };
+        assert_eq!(solution.basis_indices, vec![2, 3]);
+        assert_eq!(solution.primal, array![0.0, 0.0, 4.0, 3.0]);
+
+        let resolved = solved
+            .reoptimize_with_cost(array![-1.0, -2.0, 0.0, 0.0], &mut trace)
+            .unwrap();
+
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(solution.basis_indices, vec![0, 1]);
+        assert_eq!(solution.primal, array![4.0, 3.0, 0.0, 0.0]);
+        assert_eq!(resolved.state().lp().c(), &array![-1.0, -2.0, 0.0, 0.0]);
     }
 }
