@@ -16,11 +16,13 @@ production LP solver.
 `tsuno` is a simplex-based LP solver and analysis library. The current solver
 works on standard-form linear programs:
 
-```text
-min c^T x
-subject to A x = b
-           x >= 0
-```
+$$
+\begin{aligned}
+\min_x \quad & c^\top x \\
+\text{subject to} \quad & A x = b, \\
+& x \ge 0.
+\end{aligned}
+$$
 
 The main purpose is to make simplex internals explicit and inspectable:
 
@@ -82,14 +84,14 @@ fn main() {
 
 ### `tsuno::simplex`
 
-- `StandardFormLp` for `A`, `b`, and `c` in standard-form minimization.
+- `StandardFormLp` for $A$, $b$, and $c$ in standard-form minimization.
 - `primal::solve`, a top-level primal revised simplex entry point with Phase I
   feasible-basis construction.
 - Low-level `primal::RevisedSimplex` for stepping from an explicit
   primal-feasible basis.
 - `dual::DualRevisedSimplex` for stepping from an explicit dual-feasible basis.
 - `warm_start` and `SolvedSimplex` for reusing a basis after supported LP edits:
-  replacing `b`, replacing `c`, replacing columns, adding columns, and removing
+  replacing $b$, replacing $c$, replacing columns, adding columns, and removing
   columns.
 - `FarkasCertificate` for standard-form infeasibility proofs.
 - `FarkasCertificate::deletion_filter` for simplifying a certificate support
@@ -99,7 +101,7 @@ fn main() {
 ### `tsuno::lu`
 
 - Sparse LU factorization from COO data or dense `ndarray` matrices.
-- Basis solves for `B x = rhs` and `B^T x = rhs`.
+- Basis solves for $B x = \mathrm{rhs}$ and $B^\top x = \mathrm{rhs}$.
 - Product-form eta updates for one-column basis replacement.
 
 ## Current Limitations
@@ -136,8 +138,8 @@ For serious optimization work, use a maintained production solver instead.
 - [ ] Add a top-level dual-simplex entry point that can construct or recover a
   dual-feasible starting basis.
 - [x] Add a refactorization-based warm-start entry point for modified LPs.
-- [x] Reoptimize after replacing the right-hand side `b`.
-- [x] Reoptimize after replacing the objective `c`.
+- [x] Reoptimize after replacing the right-hand side $b$.
+- [x] Reoptimize after replacing the objective $c$.
 - [x] Reoptimize after replacing, adding, or removing columns.
 - [ ] Expand pivot selection strategies beyond the current deterministic rules.
 - [ ] Add stronger numerical termination checks around residuals and certificate
@@ -147,19 +149,17 @@ For serious optimization work, use a maintained production solver instead.
 
 For the standard-form infeasible system
 
-```text
-A x = b
-x >= 0
-```
+$$
+A x = b,\qquad x \ge 0,
+$$
 
-a Farkas certificate can be represented by a multiplier `y` satisfying
+a Farkas certificate can be represented by a multiplier $y$ satisfying
 
-```text
-A^T y >= 0
-b^T y < 0
-```
+$$
+A^\top y \ge 0,\qquad b^\top y < 0,
+$$
 
-which proves that no feasible `x >= 0` can satisfy `A x = b`.
+which proves that no feasible $x \ge 0$ can satisfy $A x = b$.
 
 - [ ] Add richer certificate diagnostics for numerical quality without making
   invalid certificates constructible.
