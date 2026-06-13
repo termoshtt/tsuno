@@ -30,7 +30,7 @@ pub enum WarmStart {
 /// callers do not have to handle an arbitrary intermediate
 /// [`RevisedSimplexState`] whose primal or dual invariant is unknown.
 pub struct SolvedSimplex {
-    state: RevisedSimplexState,
+    state: Box<RevisedSimplexState>,
     result: SimplexResult,
 }
 
@@ -75,7 +75,10 @@ impl From<StandardFormError> for ReoptimizationError {
 
 impl SolvedSimplex {
     pub(crate) fn new(state: RevisedSimplexState, result: SimplexResult) -> Self {
-        Self { state, result }
+        Self {
+            state: Box::new(state),
+            result,
+        }
     }
 
     /// Return the terminal result associated with the reusable state.
@@ -85,11 +88,11 @@ impl SolvedSimplex {
 
     /// Return the reusable revised-simplex state.
     pub fn state(&self) -> &RevisedSimplexState {
-        &self.state
+        self.state.as_ref()
     }
 
     pub fn into_state(self) -> RevisedSimplexState {
-        self.state
+        *self.state
     }
 
     #[katexit::katexit]
@@ -110,7 +113,7 @@ impl SolvedSimplex {
         rhs: Array1<f64>,
         trace: &mut impl SimplexTrace,
     ) -> Result<Self, ReoptimizationError> {
-        let state = self.state.replace_rhs(rhs)?;
+        let state = self.into_state().replace_rhs(rhs)?;
         let mut simplex = DualRevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
@@ -136,7 +139,7 @@ impl SolvedSimplex {
         cost: Array1<f64>,
         trace: &mut impl SimplexTrace,
     ) -> Result<Self, ReoptimizationError> {
-        let state = self.state.replace_cost(cost)?;
+        let state = self.into_state().replace_cost(cost)?;
         let mut simplex = RevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
@@ -171,14 +174,13 @@ impl SolvedSimplex {
         cost: f64,
         trace: &mut impl SimplexTrace,
     ) -> Result<Self, ReoptimizationError> {
-        if self.state.basis().indices().contains(&column) {
-            let state = self
-                .state
-                .replace_column_and_refactor_basis(column, values, cost)?;
+        let state = self.into_state();
+        if state.basis().indices().contains(&column) {
+            let state = state.replace_column_and_refactor_basis(column, values, cost)?;
             return WarmStart::from_state(state)?.solve_reusable(trace);
         }
 
-        let state = self.state.replace_nonbasis_column(column, values, cost)?;
+        let state = state.replace_nonbasis_column(column, values, cost)?;
         let mut simplex = RevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
@@ -204,7 +206,7 @@ impl SolvedSimplex {
         cost: f64,
         trace: &mut impl SimplexTrace,
     ) -> Result<(Self, usize), ReoptimizationError> {
-        let (state, column) = self.state.add_nonbasis_column(values, cost)?;
+        let (state, column) = self.into_state().add_nonbasis_column(values, cost)?;
         let mut simplex = RevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
@@ -232,14 +234,15 @@ impl SolvedSimplex {
         column: usize,
         trace: &mut impl SimplexTrace,
     ) -> Result<Self, ReoptimizationError> {
-        if self.state.basis().indices().contains(&column) {
-            let Some(state) = self.state.remove_basis_column_and_refactor(column)? else {
+        let state = self.into_state();
+        if state.basis().indices().contains(&column) {
+            let Some(state) = state.remove_basis_column_and_refactor(column)? else {
                 return Err(ReoptimizationError::NoReplacementBasisAfterColumnRemoval { column });
             };
             return WarmStart::from_state(state)?.solve_reusable(trace);
         }
 
-        let state = self.state.remove_nonbasis_column(column)?;
+        let state = state.remove_nonbasis_column(column)?;
         let mut simplex = RevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
         let state = simplex.into_state();
@@ -304,7 +307,7 @@ impl SolvedSimplex {
         trace: &mut impl SimplexTrace,
     ) -> Result<(Self, usize), ReoptimizationError> {
         let (state, slack_column) = self
-            .state
+            .into_state()
             .add_less_equal_constraint_with_slack_basis(coefficients, upper_bound)?;
         let mut simplex = DualRevisedSimplex::from_state(state)?;
         let result = simplex.solve(trace)?;
