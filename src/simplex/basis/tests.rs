@@ -62,6 +62,22 @@ fn basis_replaces_column_and_updates_indices() {
 }
 
 #[test]
+fn basis_rejects_replacement_that_duplicates_basis_column() {
+    let matrix = array![
+        [1.0, 2.0, 0.0, 0.0],
+        [0.0, 0.0, 3.0, 4.0],
+        [5.0, 0.0, 0.0, 6.0],
+    ];
+    let mut basis = Basis::new(&matrix, vec![0, 2, 3]).unwrap();
+
+    let error = basis
+        .replace_column(0, 2, &matrix.column(2).to_owned())
+        .unwrap_err();
+
+    assert_eq!(error, BasisError::DuplicateBasisColumn { column: 2 });
+}
+
+#[test]
 fn basis_applies_multiple_column_replacements_to_solve_and_transposed_solve() {
     let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
     let first_replacement = array![7.0, 8.0, 9.0];
@@ -189,4 +205,13 @@ fn basis_rejects_out_of_bounds_column() {
             ncols: 2
         }
     );
+}
+
+#[test]
+fn basis_rejects_duplicate_column() {
+    let matrix = array![[1.0, 0.0], [0.0, 1.0]];
+
+    let error = Basis::new(&matrix, vec![0, 0]).unwrap_err();
+
+    assert_eq!(error, BasisError::DuplicateBasisColumn { column: 0 });
 }

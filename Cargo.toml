@@ -5,6 +5,11 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/termoshtt/tsuno"
+description = "Educational simplex-based LP solver and analysis library"
+documentation = "https://termoshtt.github.io/tsuno/tsuno/"
+homepage = "https://github.com/termoshtt/tsuno"
+keywords = ["linear-programming", "simplex", "optimization"]
+categories = ["science"]
 
 [dependencies]
 katexit = "0.1.5"

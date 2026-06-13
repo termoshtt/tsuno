@@ -120,6 +120,7 @@ pub enum BasisError {
     TooFewColumns { nrows: usize, ncols: usize },
     BasisSizeMismatch { expected: usize, actual: usize },
     ColumnOutOfBounds { column: usize, ncols: usize },
+    DuplicateBasisColumn { column: usize },
     CannotRemoveBasisColumn { column: usize },
     InvalidReplacementPosition { position: usize, dimension: usize },
     InvalidColumnLength { len: usize, expected: usize },
@@ -189,6 +190,16 @@ impl Basis {
             return Err(BasisError::InvalidColumnLength {
                 len: new_column.len(),
                 expected: self.indices.len(),
+            });
+        }
+        if self
+            .indices
+            .iter()
+            .enumerate()
+            .any(|(index, &column)| index != position && column == column_index)
+        {
+            return Err(BasisError::DuplicateBasisColumn {
+                column: column_index,
             });
         }
 
@@ -316,10 +327,15 @@ fn validate_basis_indices(matrix: &Array2<f64>, indices: &[usize]) -> Result<(),
             actual: indices.len(),
         });
     }
+    let mut seen = vec![false; ncols];
     for &column in indices {
         if column >= ncols {
             return Err(BasisError::ColumnOutOfBounds { column, ncols });
         }
+        if seen[column] {
+            return Err(BasisError::DuplicateBasisColumn { column });
+        }
+        seen[column] = true;
     }
     Ok(())
 }

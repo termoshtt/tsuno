@@ -6,7 +6,7 @@ pub(crate) fn diagonally_dominant_matrix(
     density: f64,
     rng: &mut impl Rng,
 ) -> Array2<f64> {
-    assert!(density >= 0.0 && density <= 1.0);
+    assert!((0.0..=1.0).contains(&density));
 
     let mut matrix = Array2::zeros((size, size));
     for row in 0..size {

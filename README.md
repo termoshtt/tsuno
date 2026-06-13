@@ -85,6 +85,24 @@ fn main() {
 API documentation is published from `cargo doc` on GitHub Pages:
 <https://termoshtt.github.io/tsuno/>
 
+## Assumptions
+
+`tsuno` intentionally exposes low-level simplex objects. Callers are expected to
+provide LPs already converted to standard form:
+
+$$
+\min c^\top x \quad \text{s.t.}\quad Ax=b,\ x\ge 0.
+$$
+
+Current APIs assume finite `f64` input data. Basis-level APIs expect a valid
+basis index set with no duplicate columns and a nonsingular basis matrix. The
+crate currently does not perform full presolve, scaling, redundant-row removal,
+or robust numerical rank detection.
+
+Warm-start APIs reuse the current basis only for supported structural edits.
+When neither primal nor dual feasibility is preserved, callers should fall back
+to the top-level Phase I solve.
+
 ## Current Features
 
 ### `tsuno::simplex`
@@ -122,6 +140,8 @@ This project intentionally remains small and experimental.
 - Numerical handling is incomplete: pivoting, residual checks, refactorization
   strategy, scaling, degeneracy handling, and certificate-quality checks need
   more work.
+- Rank-deficient or redundant equality systems may require preprocessing before
+  they can be handled reliably.
 - Performance is not production-tuned or benchmarked across realistic workloads.
 - Public APIs may change as the educational examples and solver internals evolve.
 
