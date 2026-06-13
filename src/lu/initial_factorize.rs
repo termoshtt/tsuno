@@ -281,7 +281,6 @@ impl Worker {
             u: U::from_rows(self.factorized_u_rows),
             p: self.p,
             q: self.q,
-            eta_updates: Vec::new(),
         }
     }
 }

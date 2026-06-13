@@ -245,6 +245,75 @@ impl SolvedSimplex {
         let state = simplex.into_state();
         Ok(SolvedSimplex::new(state, SimplexResult::from(result)))
     }
+
+    #[katexit::katexit]
+    /// Add one less-than-or-equal constraint with a slack basis variable and
+    /// reoptimize immediately.
+    ///
+    /// This is the fast reoptimization path for adding a constraint
+    ///
+    /// $$
+    /// a^T x \le \beta.
+    /// $$
+    ///
+    /// The updated standard-form LP is
+    ///
+    /// $$
+    /// \begin{bmatrix}
+    /// A & 0 \\
+    /// a^T & 1
+    /// \end{bmatrix}
+    /// \begin{bmatrix}
+    /// x \\
+    /// s
+    /// \end{bmatrix}
+    /// =
+    /// \begin{bmatrix}
+    /// b \\
+    /// \beta
+    /// \end{bmatrix},
+    /// \qquad x,s \ge 0.
+    /// $$
+    ///
+    /// The new slack column is added to the basis. If the previous basis was
+    /// $I$, the new basis matrix is
+    ///
+    /// $$
+    /// B^+ =
+    /// \begin{bmatrix}
+    /// B & 0 \\
+    /// a_I^T & 1
+    /// \end{bmatrix}.
+    /// $$
+    ///
+    /// This block representation reuses the previous basis solve. Its basic
+    /// slack value is
+    ///
+    /// $$
+    /// s = \beta - a^T x.
+    /// $$
+    ///
+    /// If $s \ge 0$, the old optimum remains feasible and dual simplex returns
+    /// optimality immediately. If $s < 0$, the slack is the only newly
+    /// introduced primal infeasibility while reduced costs stay dual feasible,
+    /// so dual revised simplex can reoptimize from this state.
+    pub fn reoptimize_with_less_equal_constraint(
+        self,
+        coefficients: Array1<f64>,
+        upper_bound: f64,
+        trace: &mut impl SimplexTrace,
+    ) -> Result<(Self, usize), ReoptimizationError> {
+        let (state, slack_column) = self
+            .state
+            .add_less_equal_constraint_with_slack_basis(coefficients, upper_bound)?;
+        let mut simplex = DualRevisedSimplex::from_state(state)?;
+        let result = simplex.solve(trace)?;
+        let state = simplex.into_state();
+        Ok((
+            SolvedSimplex::new(state, SimplexResult::from(result)),
+            slack_column,
+        ))
+    }
 }
 
 impl WarmStart {
@@ -633,5 +702,64 @@ mod tests {
         assert_eq!(solution.basis_indices, vec![0, 2]);
         assert_eq!(solution.primal, array![4.0, 0.0, 3.0]);
         assert_eq!(resolved.state().lp().a().ncols(), 3);
+    }
+
+    #[test]
+    fn solved_simplex_keeps_solution_after_satisfied_less_equal_constraint_addition() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![-1.0, -2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+
+        let (resolved, slack_column) = solved
+            .reoptimize_with_less_equal_constraint(array![1.0, 1.0, 0.0, 0.0], 10.0, &mut trace)
+            .unwrap();
+
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(slack_column, 4);
+        assert_eq!(solution.basis_indices, vec![0, 1, 4]);
+        assert_eq!(solution.primal, array![4.0, 3.0, 0.0, 0.0, 3.0]);
+        assert_eq!(solution.objective_value, -10.0);
+        assert_eq!(solution.iterations, 0);
+    }
+
+    #[test]
+    fn solved_simplex_reoptimizes_after_violated_less_equal_constraint_addition() {
+        let lp = StandardFormLp::new(
+            array![[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]],
+            array![4.0, 3.0],
+            array![-1.0, -2.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let mut trace = NoTrace;
+        let reusable =
+            primal::solve_reusable(lp, RevisedSimplexOptions::default(), &mut trace).unwrap();
+        let primal::ReusableSolveResult::Solved(solved) = reusable else {
+            panic!("expected reusable solved state");
+        };
+
+        let (resolved, slack_column) = solved
+            .reoptimize_with_less_equal_constraint(array![1.0, 1.0, 0.0, 0.0], 5.0, &mut trace)
+            .unwrap();
+
+        let SimplexResult::Optimal(solution) = resolved.result() else {
+            panic!("expected optimal reoptimized result");
+        };
+        assert_eq!(slack_column, 4);
+        assert_eq!(solution.basis_indices, vec![0, 1, 2]);
+        assert_eq!(solution.primal, array![2.0, 3.0, 2.0, 0.0, 0.0]);
+        assert_eq!(solution.objective_value, -8.0);
+        assert_eq!(resolved.state().lp().a().nrows(), 3);
+        assert_eq!(resolved.state().lp().a().ncols(), 5);
     }
 }

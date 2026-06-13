@@ -27,7 +27,7 @@ $$
 The main purpose is to make simplex internals explicit and inspectable:
 
 - basis construction and basis-level algebra,
-- sparse LU factorization and eta-update mechanics,
+- sparse LU factorization plus basis-level update mechanics,
 - primal and dual revised simplex steps,
 - warm-start and reoptimization behavior after small LP edits,
 - Farkas certificates and row-support simplification for infeasible LPs,
@@ -97,7 +97,10 @@ API documentation is published from `cargo doc` on GitHub Pages:
 - `dual::DualRevisedSimplex` for stepping from an explicit dual-feasible basis.
 - `warm_start` and `SolvedSimplex` for reusing a basis after supported LP edits:
   replacing $b$, replacing $c$, replacing columns, adding columns, and removing
-  columns.
+  columns, plus adding less-than-or-equal constraints with slack variables.
+- `Basis` product-form eta updates for one-column basis replacement.
+- `Basis` block solves for adding less-than-or-equal constraints with a slack
+  basis variable.
 - `FarkasCertificate` for standard-form infeasibility proofs.
 - `FarkasCertificate::deletion_filter` for simplifying a certificate support
   into a smaller standard-form row subsystem.
@@ -107,7 +110,6 @@ API documentation is published from `cargo doc` on GitHub Pages:
 
 - Sparse LU factorization from COO data or dense `ndarray` matrices.
 - Basis solves for $B x = \mathrm{rhs}$ and $B^\top x = \mathrm{rhs}$.
-- Product-form eta updates for one-column basis replacement.
 
 ## Current Limitations
 
@@ -132,7 +134,8 @@ For serious optimization work, use a maintained production solver instead.
 - [ ] Improve numerical stability in sparse pivot selection.
 - [ ] Track growth, small pivots, and residual quality.
 - [ ] Add explicit basis refactorization from the latest basis matrix.
-- [ ] Replace or supplement eta updates with Forrest-Tomlin-style updates.
+- [ ] Replace or supplement basis-level eta updates with Forrest-Tomlin-style
+  updates.
 - [ ] Add sparse and hyper-sparse right-hand-side solve paths.
 - [ ] Reduce allocation and data movement in repeated basis solves.
 - [ ] Benchmark factorization, solve, transposed solve, and update workloads.
@@ -146,6 +149,8 @@ For serious optimization work, use a maintained production solver instead.
 - [x] Reoptimize after replacing the right-hand side $b$.
 - [x] Reoptimize after replacing the objective $c$.
 - [x] Reoptimize after replacing, adding, or removing columns.
+- [x] Reoptimize after adding a less-than-or-equal constraint with a slack
+  basis variable.
 - [ ] Expand pivot selection strategies beyond the current deterministic rules.
 - [ ] Add stronger numerical termination checks around residuals and certificate
   quality.
