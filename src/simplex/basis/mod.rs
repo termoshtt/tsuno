@@ -4,6 +4,8 @@ mod representation;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
+
 use ndarray::{Array1, Array2};
 
 use crate::lu::LU;
@@ -327,15 +329,14 @@ fn validate_basis_indices(matrix: &Array2<f64>, indices: &[usize]) -> Result<(),
             actual: indices.len(),
         });
     }
-    let mut seen = vec![false; ncols];
+    let mut seen = HashSet::with_capacity(indices.len());
     for &column in indices {
         if column >= ncols {
             return Err(BasisError::ColumnOutOfBounds { column, ncols });
         }
-        if seen[column] {
+        if !seen.insert(column) {
             return Err(BasisError::DuplicateBasisColumn { column });
         }
-        seen[column] = true;
     }
     Ok(())
 }
