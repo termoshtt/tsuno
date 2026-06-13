@@ -279,13 +279,18 @@ impl RevisedSimplexState {
         column: usize,
     ) -> Result<Array1<f64>, StandardFormError> {
         let column = self.lp.column(column)?.to_owned();
-        Ok(self.basis.solve(&column))
+        self.basis.solve(&column).map_err(StandardFormError::Basis)
     }
 
-    pub(crate) fn solve_transposed_basis_unit(&self, position: usize) -> Array1<f64> {
+    pub(crate) fn solve_transposed_basis_unit(
+        &self,
+        position: usize,
+    ) -> Result<Array1<f64>, StandardFormError> {
         let mut unit = Array1::zeros(self.lp.a().nrows());
         unit[position] = 1.0;
-        self.basis.solve_transposed(&unit)
+        self.basis
+            .solve_transposed(&unit)
+            .map_err(StandardFormError::Basis)
     }
 
     pub(crate) fn replace_basis_column(

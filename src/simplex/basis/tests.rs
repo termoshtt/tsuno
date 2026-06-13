@@ -2,6 +2,7 @@ use approx::assert_abs_diff_eq;
 use ndarray::array;
 
 use super::*;
+use crate::lu::LuError;
 
 #[test]
 fn basis_builds_matrix_and_solves() {
@@ -15,7 +16,7 @@ fn basis_builds_matrix_and_solves() {
     let basis_matrix = array![[2.0, 0.0, 0.0], [0.0, 3.0, 4.0], [0.0, 0.0, 6.0]];
     let rhs = basis_matrix.dot(&expected_solution);
 
-    let solution = basis.solve(&rhs);
+    let solution = basis.solve(&rhs).unwrap();
 
     assert_eq!(basis.indices(), &[1, 2, 3]);
     assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
@@ -33,9 +34,41 @@ fn basis_solves_transposed_system() {
     let basis_matrix = array![[2.0, 0.0, 0.0], [0.0, 3.0, 4.0], [0.0, 0.0, 6.0]];
     let rhs = basis_matrix.t().dot(&expected_solution);
 
-    let solution = basis.solve_transposed(&rhs);
+    let solution = basis.solve_transposed(&rhs).unwrap();
 
     assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+}
+
+#[test]
+fn basis_solve_rejects_wrong_rhs_length() {
+    let matrix = array![[1.0, 0.0], [0.0, 1.0]];
+    let basis = Basis::new(&matrix, vec![0, 1]).unwrap();
+
+    let error = basis.solve(&array![1.0]).unwrap_err();
+
+    assert_eq!(
+        error,
+        BasisError::RightHandSideLengthMismatch {
+            expected: 2,
+            actual: 1
+        }
+    );
+}
+
+#[test]
+fn basis_solve_reports_rank_deficient_basis() {
+    let matrix = array![[1.0, 2.0], [2.0, 4.0]];
+    let basis = Basis::new(&matrix, vec![0, 1]).unwrap();
+
+    let error = basis.solve(&array![1.0, 2.0]).unwrap_err();
+
+    assert_eq!(
+        error,
+        BasisError::Lu(LuError::RankDeficientMatrix {
+            rank: 1,
+            dimension: 2
+        })
+    );
 }
 
 #[test]
@@ -54,7 +87,7 @@ fn basis_replaces_column_and_updates_indices() {
         .unwrap();
     updated_basis.column_mut(0).assign(&matrix.column(1));
     let rhs = updated_basis.dot(&expected_solution);
-    let solution = basis.solve(&rhs);
+    let solution = basis.solve(&rhs).unwrap();
 
     assert_eq!(basis.indices(), &[1, 2, 3]);
     assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
@@ -93,8 +126,8 @@ fn basis_applies_multiple_column_replacements_to_solve_and_transposed_solve() {
     let rhs = expected_basis.dot(&expected_solution);
     let transposed_rhs = expected_basis.t().dot(&expected_solution);
 
-    let solution = basis.solve(&rhs);
-    let transposed_solution = basis.solve_transposed(&transposed_rhs);
+    let solution = basis.solve(&rhs).unwrap();
+    let transposed_solution = basis.solve_transposed(&transposed_rhs).unwrap();
 
     assert_eq!(basis.indices(), &[4, 3, 2]);
     assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
@@ -113,9 +146,9 @@ fn basis_extends_less_equal_slack_and_solves_block_system() {
     let basis_matrix = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [2.0, 3.0, 1.0]];
     let rhs = basis_matrix.dot(&expected_solution);
 
-    let solution = basis.solve(&rhs);
+    let solution = basis.solve(&rhs).unwrap();
     let transposed_rhs = basis_matrix.t().dot(&expected_solution);
-    let transposed_solution = basis.solve_transposed(&transposed_rhs);
+    let transposed_solution = basis.solve_transposed(&transposed_rhs).unwrap();
 
     assert_eq!(basis.indices(), &[0, 1, 2]);
     assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
@@ -135,7 +168,7 @@ fn basis_replaces_column_after_less_equal_slack_extension() {
 
     basis.replace_column(2, 2, &replacement).unwrap();
     let rhs = basis_matrix.dot(&expected_solution);
-    let solution = basis.solve(&rhs);
+    let solution = basis.solve(&rhs).unwrap();
 
     assert_eq!(basis.indices(), &[0, 1, 2]);
     assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);

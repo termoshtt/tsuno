@@ -537,7 +537,7 @@ impl StandardFormLp {
     /// value zero in the corresponding full basic solution.
     pub fn basic_solution(&self, basis: &Basis) -> Result<Array1<f64>, StandardFormError> {
         self.basis_column_mask(basis)?;
-        Ok(basis.solve(&self.b))
+        basis.solve(&self.b).map_err(StandardFormError::Basis)
     }
 
     /// Return the basis cost vector.
@@ -557,7 +557,9 @@ impl StandardFormLp {
     /// $y$ satisfying $B^T y = c_I$, equivalently $y = B^{-T} c_I$.
     pub fn dual_variables(&self, basis: &Basis) -> Result<Array1<f64>, StandardFormError> {
         let basis_costs = self.basis_costs(basis)?;
-        Ok(basis.solve_transposed(&basis_costs))
+        basis
+            .solve_transposed(&basis_costs)
+            .map_err(StandardFormError::Basis)
     }
 
     /// Compute the reduced cost of a column.

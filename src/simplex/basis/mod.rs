@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use ndarray::{Array1, Array2};
 
-use crate::lu::LU;
+use crate::lu::{LU, LuError};
 
 use eta::BasisEtaUpdate;
 use representation::BasisRepresentation;
@@ -123,10 +123,12 @@ pub enum BasisError {
     BasisSizeMismatch { expected: usize, actual: usize },
     ColumnOutOfBounds { column: usize, ncols: usize },
     DuplicateBasisColumn { column: usize },
+    RightHandSideLengthMismatch { expected: usize, actual: usize },
     CannotRemoveBasisColumn { column: usize },
     InvalidReplacementPosition { position: usize, dimension: usize },
     InvalidColumnLength { len: usize, expected: usize },
     InvalidExtensionRowLength { len: usize, expected: usize },
+    Lu(LuError),
     Update(BasisUpdateError),
 }
 
@@ -137,7 +139,9 @@ impl Basis {
         let basis_matrix = basis_matrix(matrix, &indices);
         Ok(Self {
             indices,
-            representation: BasisRepresentation::Factorized(LU::from_dense(basis_matrix)),
+            representation: BasisRepresentation::Factorized(
+                LU::from_dense(basis_matrix).map_err(BasisError::Lu)?,
+            ),
             eta_updates: Vec::new(),
         })
     }
@@ -146,25 +150,27 @@ impl Basis {
         &self.indices
     }
 
-    pub fn solve(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        assert_eq!(
-            rhs.len(),
-            self.dimension(),
-            "right-hand side length must match the basis dimension"
-        );
-        let mut solution = self.solve_base(rhs);
+    pub fn solve(&self, rhs: &Array1<f64>) -> Result<Array1<f64>, BasisError> {
+        if rhs.len() != self.dimension() {
+            return Err(BasisError::RightHandSideLengthMismatch {
+                expected: self.dimension(),
+                actual: rhs.len(),
+            });
+        }
+        let mut solution = self.solve_base(rhs)?;
         for eta_update in &self.eta_updates {
             eta_update.apply_inverse(&mut solution);
         }
-        solution
+        Ok(solution)
     }
 
-    pub fn solve_transposed(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        assert_eq!(
-            rhs.len(),
-            self.dimension(),
-            "right-hand side length must match the basis dimension"
-        );
+    pub fn solve_transposed(&self, rhs: &Array1<f64>) -> Result<Array1<f64>, BasisError> {
+        if rhs.len() != self.dimension() {
+            return Err(BasisError::RightHandSideLengthMismatch {
+                expected: self.dimension(),
+                actual: rhs.len(),
+            });
+        }
         let mut rhs = rhs.to_owned();
         for eta_update in self.eta_updates.iter().rev() {
             eta_update.apply_inverse_transposed(&mut rhs);
@@ -207,7 +213,7 @@ impl Basis {
 
         self.check_update_ready(position, new_column)
             .map_err(BasisError::Update)?;
-        let column = self.solve(new_column);
+        let column = self.solve(new_column)?;
         if column[position].abs() <= BASIS_ETA_PIVOT_TOLERANCE {
             return Err(BasisError::Update(BasisUpdateError::SmallEtaPivot {
                 pivot: position,
@@ -280,11 +286,11 @@ impl Basis {
         self.representation.update_count() + self.eta_updates.len()
     }
 
-    fn solve_base(&self, rhs: &Array1<f64>) -> Array1<f64> {
+    fn solve_base(&self, rhs: &Array1<f64>) -> Result<Array1<f64>, BasisError> {
         self.representation.solve(rhs)
     }
 
-    fn solve_base_transposed(&self, rhs: &Array1<f64>) -> Array1<f64> {
+    fn solve_base_transposed(&self, rhs: &Array1<f64>) -> Result<Array1<f64>, BasisError> {
         self.representation.solve_transposed(rhs)
     }
 
