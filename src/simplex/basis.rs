@@ -1,6 +1,6 @@
 use ndarray::{Array1, Array2};
 
-use crate::lu::{LU, UpdateError};
+use crate::lu::LU;
 
 const BASIS_ETA_PIVOT_TOLERANCE: f64 = 1.0e-12;
 
@@ -100,6 +100,27 @@ struct BasisEtaUpdate {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum BasisUpdateError {
+    RankDeficientBasis {
+        rank: usize,
+        dimension: usize,
+    },
+    PivotOutOfBounds {
+        pivot: usize,
+        dimension: usize,
+    },
+    InvalidColumnLength {
+        len: usize,
+        expected: usize,
+    },
+    SmallEtaPivot {
+        pivot: usize,
+        value: f64,
+        tolerance: f64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum BasisError {
     EmptyBasis,
     TooFewColumns { nrows: usize, ncols: usize },
@@ -109,7 +130,7 @@ pub enum BasisError {
     InvalidReplacementPosition { position: usize, dimension: usize },
     InvalidColumnLength { len: usize, expected: usize },
     InvalidExtensionRowLength { len: usize, expected: usize },
-    Update(UpdateError),
+    Update(BasisUpdateError),
 }
 
 impl Basis {
@@ -181,7 +202,7 @@ impl Basis {
             .map_err(BasisError::Update)?;
         let column = self.solve(new_column);
         if column[position].abs() <= BASIS_ETA_PIVOT_TOLERANCE {
-            return Err(BasisError::Update(UpdateError::SmallEtaPivot {
+            return Err(BasisError::Update(BasisUpdateError::SmallEtaPivot {
                 pivot: position,
                 value: column[position],
                 tolerance: BASIS_ETA_PIVOT_TOLERANCE,
@@ -267,21 +288,21 @@ impl Basis {
         &self,
         pivot: usize,
         new_column: &Array1<f64>,
-    ) -> Result<(), UpdateError> {
+    ) -> Result<(), BasisUpdateError> {
         if self.rank() != self.dimension() {
-            return Err(UpdateError::RankDeficientFactorization {
+            return Err(BasisUpdateError::RankDeficientBasis {
                 rank: self.rank(),
                 dimension: self.dimension(),
             });
         }
         if pivot >= self.dimension() {
-            return Err(UpdateError::PivotOutOfBounds {
+            return Err(BasisUpdateError::PivotOutOfBounds {
                 pivot,
                 dimension: self.dimension(),
             });
         }
         if new_column.len() != self.dimension() {
-            return Err(UpdateError::InvalidColumnLength {
+            return Err(BasisUpdateError::InvalidColumnLength {
                 len: new_column.len(),
                 expected: self.dimension(),
             });
@@ -300,7 +321,7 @@ impl BasisRepresentation {
 
     fn update_count(&self) -> usize {
         match self {
-            BasisRepresentation::Factorized(lu) => lu.update_count(),
+            BasisRepresentation::Factorized(_) => 0,
             BasisRepresentation::LessEqualSlack { base, .. } => base.update_count(),
         }
     }
@@ -473,6 +494,31 @@ mod tests {
         assert_eq!(basis.indices(), &[1, 2, 3]);
         assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
         assert!(basis.should_refactor(1));
+    }
+
+    #[test]
+    fn basis_applies_multiple_column_replacements_to_solve_and_transposed_solve() {
+        let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
+        let first_replacement = array![7.0, 8.0, 9.0];
+        let second_replacement = array![3.0, 1.0, 4.0];
+        let expected_solution = array![1.0, 2.0, 5.0];
+        let mut expected_basis = matrix.clone();
+        let mut basis = Basis::new(&matrix, vec![0, 1, 2]).unwrap();
+
+        basis.replace_column(1, 3, &first_replacement).unwrap();
+        expected_basis.column_mut(1).assign(&first_replacement);
+        basis.replace_column(0, 4, &second_replacement).unwrap();
+        expected_basis.column_mut(0).assign(&second_replacement);
+        let rhs = expected_basis.dot(&expected_solution);
+        let transposed_rhs = expected_basis.t().dot(&expected_solution);
+
+        let solution = basis.solve(&rhs);
+        let transposed_solution = basis.solve_transposed(&transposed_rhs);
+
+        assert_eq!(basis.indices(), &[4, 3, 2]);
+        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
+        assert_abs_diff_eq!(transposed_solution, expected_solution, epsilon = 1.0e-9);
+        assert!(basis.should_refactor(2));
     }
 
     #[test]

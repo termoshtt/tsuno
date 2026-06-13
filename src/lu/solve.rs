@@ -5,15 +5,10 @@ use super::{LU, assert_solve_ready};
 impl LU {
     /// Solve a linear system with the represented matrix.
     ///
-    /// This computes `x` in `A x = rhs` using the initial sparse LU
-    /// factorization and accumulated eta updates, without explicitly forming
-    /// `A^{-1}`.
+    /// This computes `x` in `A x = rhs` using the sparse LU factorization,
+    /// without explicitly forming `A^{-1}`.
     pub fn solve(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        let mut solution = self.solve_initial(rhs);
-        for eta_update in &self.eta_updates {
-            eta_update.apply_inverse(&mut solution);
-        }
-        solution
+        self.solve_initial(rhs)
     }
 
     pub(crate) fn solve_initial(&self, rhs: &Array1<f64>) -> Array1<f64> {
@@ -110,40 +105,5 @@ mod tests {
         let lu = LU::from_dense(matrix);
 
         lu.solve(&array![1.0, 2.0]);
-    }
-
-    #[test]
-    fn solve_applies_column_replacements() {
-        let mut matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
-        let replacement = array![7.0, 8.0, 9.0];
-        let expected_solution = array![1.0, 2.0, 5.0];
-        let mut lu = LU::from_dense(matrix.clone());
-
-        lu.replace_column(1, &replacement).unwrap();
-        matrix.column_mut(1).assign(&replacement);
-        let rhs = matrix.dot(&expected_solution);
-        let solution = lu.solve(&rhs);
-
-        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
-        assert_eq!(lu.update_count(), 1);
-    }
-
-    #[test]
-    fn solve_applies_multiple_column_replacements() {
-        let mut matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
-        let first_replacement = array![7.0, 8.0, 9.0];
-        let second_replacement = array![3.0, 1.0, 4.0];
-        let expected_solution = array![1.0, 2.0, 5.0];
-        let mut lu = LU::from_dense(matrix.clone());
-
-        lu.replace_column(1, &first_replacement).unwrap();
-        matrix.column_mut(1).assign(&first_replacement);
-        lu.replace_column(0, &second_replacement).unwrap();
-        matrix.column_mut(0).assign(&second_replacement);
-        let rhs = matrix.dot(&expected_solution);
-        let solution = lu.solve(&rhs);
-
-        assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
-        assert_eq!(lu.update_count(), 2);
     }
 }
