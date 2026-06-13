@@ -14,6 +14,17 @@ pub use initial_factorize::*;
 pub use lower::*;
 pub use upper::*;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum LuError {
+    ZeroRows,
+    ZeroColumns,
+    EntryRowOutOfBounds { row: usize, nrows: usize },
+    EntryColumnOutOfBounds { column: usize, ncols: usize },
+    NonSquareMatrix { nrows: usize, ncols: usize },
+    RankDeficientMatrix { rank: usize, dimension: usize },
+    RightHandSideLengthMismatch { expected: usize, actual: usize },
+}
+
 #[katexit::katexit]
 /// Storage for a LU-decomposed matrix
 ///
@@ -44,13 +55,13 @@ impl LU {
         nrows: usize,
         ncols: usize,
         coo: impl Iterator<Item = (usize, usize, f64)>,
-    ) -> Self {
-        Worker::from_coo_matrix(nrows, ncols, coo).factorize()
+    ) -> Result<Self, LuError> {
+        Ok(Worker::from_coo_matrix(nrows, ncols, coo)?.factorize())
     }
 
     /// Initial factorization from a dense matrix.
-    pub fn from_dense(array: Array2<f64>) -> Self {
-        Worker::from_dense(array).factorize()
+    pub fn from_dense(array: Array2<f64>) -> Result<Self, LuError> {
+        Ok(Worker::from_dense(array)?.factorize())
     }
 
     pub fn l(&self) -> &L {
@@ -86,11 +97,18 @@ impl LU {
     }
 }
 
-pub(crate) fn assert_solve_ready(lu: &LU) {
-    assert_eq!(lu.nrows, lu.ncols, "solve requires a square matrix");
-    assert_eq!(
-        lu.p.len(),
-        lu.nrows,
-        "solve requires a full-rank factorization"
-    );
+pub(crate) fn validate_solve_ready(lu: &LU) -> Result<(), LuError> {
+    if lu.nrows != lu.ncols {
+        return Err(LuError::NonSquareMatrix {
+            nrows: lu.nrows,
+            ncols: lu.ncols,
+        });
+    }
+    if lu.p.len() != lu.nrows {
+        return Err(LuError::RankDeficientMatrix {
+            rank: lu.p.len(),
+            dimension: lu.nrows,
+        });
+    }
+    Ok(())
 }

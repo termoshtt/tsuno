@@ -368,10 +368,11 @@ impl WarmStart {
                 Err(dual) => Err(WarmStartError::NoReusableBasis { primal, dual }),
             }
         } else {
-            Ok(WarmStart::Primal(
-                RevisedSimplex::from_state(state)
-                    .expect("state was already checked primal feasible"),
-            ))
+            match RevisedSimplex::from_state(state) {
+                Ok(simplex) => Ok(WarmStart::Primal(simplex)),
+                Err(PrimalSimplexError::Problem(error)) => Err(WarmStartError::Problem(error)),
+                Err(error) => Err(WarmStartError::UnexpectedPrimalError(error)),
+            }
         }
     }
 }
@@ -379,6 +380,7 @@ impl WarmStart {
 #[derive(Clone, Debug, PartialEq)]
 pub enum WarmStartError {
     Problem(StandardFormError),
+    UnexpectedPrimalError(PrimalSimplexError),
     NoReusableBasis {
         primal: PrimalSimplexError,
         dual: DualSimplexError,

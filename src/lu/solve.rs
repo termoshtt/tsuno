@@ -1,23 +1,24 @@
 use ndarray::Array1;
 
-use super::{LU, assert_solve_ready};
+use super::{LU, LuError, validate_solve_ready};
 
 impl LU {
     /// Solve a linear system with the represented matrix.
     ///
     /// This computes `x` in `A x = rhs` using the sparse LU factorization,
     /// without explicitly forming `A^{-1}`.
-    pub fn solve(&self, rhs: &Array1<f64>) -> Array1<f64> {
+    pub fn solve(&self, rhs: &Array1<f64>) -> Result<Array1<f64>, LuError> {
         self.solve_initial(rhs)
     }
 
-    pub(crate) fn solve_initial(&self, rhs: &Array1<f64>) -> Array1<f64> {
-        assert_solve_ready(self);
-        assert_eq!(
-            rhs.len(),
-            self.nrows,
-            "right-hand side length must match the matrix row dimension"
-        );
+    pub(crate) fn solve_initial(&self, rhs: &Array1<f64>) -> Result<Array1<f64>, LuError> {
+        validate_solve_ready(self)?;
+        if rhs.len() != self.nrows {
+            return Err(LuError::RightHandSideLengthMismatch {
+                expected: self.nrows,
+                actual: rhs.len(),
+            });
+        }
 
         let mut transformed_rhs = rhs.to_owned();
         for (mu, row, col) in self.l.units() {
@@ -45,7 +46,7 @@ impl LU {
             solution[pivot_col] = (pivot_rhs[step] - known_sum) / pivot;
         }
 
-        solution
+        Ok(solution)
     }
 }
 
@@ -56,17 +57,17 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
-    use super::super::LU;
     use super::super::test_support::{diagonally_dominant_matrix, vector};
+    use super::super::{LU, LuError};
 
     #[test]
     fn solve_solves_dense_rhs() {
         let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
         let expected_solution = array![1.0, 2.0, 5.0];
         let rhs = matrix.dot(&expected_solution);
-        let lu = LU::from_dense(matrix.clone());
+        let lu = LU::from_dense(matrix.clone()).unwrap();
 
-        let solution = lu.solve(&rhs);
+        let solution = lu.solve(&rhs).unwrap();
 
         assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
     }
@@ -76,9 +77,9 @@ mod tests {
         let matrix = array![[0.0, 2.0, 0.0], [3.0, 0.0, 4.0], [0.0, 5.0, 6.0]];
         let expected_solution = array![3.0, 2.0, 4.0];
         let rhs = matrix.dot(&expected_solution);
-        let lu = LU::from_dense(matrix.clone());
+        let lu = LU::from_dense(matrix.clone()).unwrap();
 
-        let solution = lu.solve(&rhs);
+        let solution = lu.solve(&rhs).unwrap();
 
         assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
     }
@@ -90,20 +91,53 @@ mod tests {
             let matrix = diagonally_dominant_matrix(8, density, &mut rng);
             let expected_solution = vector(8, &mut rng);
             let rhs = matrix.dot(&expected_solution);
-            let lu = LU::from_dense(matrix);
+            let lu = LU::from_dense(matrix).unwrap();
 
-            let solution = lu.solve(&rhs);
+            let solution = lu.solve(&rhs).unwrap();
 
             assert_abs_diff_eq!(solution, expected_solution, epsilon = 1.0e-9);
         }
     }
 
     #[test]
-    #[should_panic(expected = "solve requires a square matrix")]
     fn solve_rejects_rectangular_matrix() {
         let matrix = array![[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]];
-        let lu = LU::from_dense(matrix);
+        let lu = LU::from_dense(matrix).unwrap();
 
-        lu.solve(&array![1.0, 2.0]);
+        let error = lu.solve(&array![1.0, 2.0]).unwrap_err();
+
+        assert_eq!(error, LuError::NonSquareMatrix { nrows: 2, ncols: 3 });
+    }
+
+    #[test]
+    fn solve_rejects_wrong_rhs_length() {
+        let matrix = array![[1.0, 0.0], [0.0, 1.0]];
+        let lu = LU::from_dense(matrix).unwrap();
+
+        let error = lu.solve(&array![1.0]).unwrap_err();
+
+        assert_eq!(
+            error,
+            LuError::RightHandSideLengthMismatch {
+                expected: 2,
+                actual: 1
+            }
+        );
+    }
+
+    #[test]
+    fn solve_rejects_rank_deficient_matrix() {
+        let matrix = array![[1.0, 2.0], [2.0, 4.0]];
+        let lu = LU::from_dense(matrix).unwrap();
+
+        let error = lu.solve(&array![1.0, 2.0]).unwrap_err();
+
+        assert_eq!(
+            error,
+            LuError::RankDeficientMatrix {
+                rank: 1,
+                dimension: 2
+            }
+        );
     }
 }

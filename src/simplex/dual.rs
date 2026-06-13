@@ -305,7 +305,7 @@ impl DualRevisedSimplex {
         &self,
         leaving: &LeavingBasicVariable,
     ) -> Result<Array1<f64>, StandardFormError> {
-        let row_multiplier = self.infeasibility_multiplier(leaving);
+        let row_multiplier = self.infeasibility_multiplier(leaving)?;
         Ok(self.lp().a().t().dot(&row_multiplier))
     }
 
@@ -327,7 +327,10 @@ impl DualRevisedSimplex {
     ///
     /// this $u$ is a Farkas certificate for infeasibility of
     /// $Ax=b,\ x\ge 0$.
-    fn infeasibility_multiplier(&self, leaving: &LeavingBasicVariable) -> Array1<f64> {
+    fn infeasibility_multiplier(
+        &self,
+        leaving: &LeavingBasicVariable,
+    ) -> Result<Array1<f64>, StandardFormError> {
         self.state.solve_transposed_basis_unit(leaving.position)
     }
 
@@ -337,7 +340,7 @@ impl DualRevisedSimplex {
     ) -> Result<FarkasCertificate, StandardFormError> {
         FarkasCertificate::new(
             self.lp().clone(),
-            self.infeasibility_multiplier(leaving),
+            self.infeasibility_multiplier(leaving)?,
             self.options().pivot_tolerance,
         )
     }

@@ -49,7 +49,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn from_dense(array: Array2<f64>) -> Self {
+    pub fn from_dense(array: Array2<f64>) -> Result<Self, LuError> {
         let (nrows, ncols) = array.dim();
         let coo = array
             .indexed_iter()
@@ -63,20 +63,22 @@ impl Worker {
         nrows: usize,
         ncols: usize,
         coo: impl Iterator<Item = (usize, usize, f64)>,
-    ) -> Self {
-        assert!(nrows > 0, "number of rows must be positive");
-        assert!(ncols > 0, "number of columns must be positive");
+    ) -> Result<Self, LuError> {
+        if nrows == 0 {
+            return Err(LuError::ZeroRows);
+        }
+        if ncols == 0 {
+            return Err(LuError::ZeroColumns);
+        }
 
         let entries = coo.collect::<Vec<_>>();
         for &(row, col, _) in &entries {
-            assert!(
-                row < nrows,
-                "row index {row} is out of bounds for {nrows} rows"
-            );
-            assert!(
-                col < ncols,
-                "column index {col} is out of bounds for {ncols} columns"
-            );
+            if row >= nrows {
+                return Err(LuError::EntryRowOutOfBounds { row, nrows });
+            }
+            if col >= ncols {
+                return Err(LuError::EntryColumnOutOfBounds { column: col, ncols });
+            }
         }
 
         let mut work_rows = vec![BTreeMap::new(); nrows];
@@ -92,7 +94,7 @@ impl Worker {
             }
         }
 
-        Self {
+        Ok(Self {
             step: 0,
             nrows,
             ncols,
@@ -104,7 +106,7 @@ impl Worker {
             factorized_u_rows: Vec::new(),
             p: Vec::new(),
             q: Vec::new(),
-        }
+        })
     }
 
     fn active_row_len(&self, row: usize) -> usize {
@@ -299,7 +301,7 @@ mod tests {
             [0.0, 0.0, 0.0, 0.0, 0.0],
             [0.0, 20.0, 0.0, 0.0, 0.0],
         ];
-        let worker = Worker::from_dense(matrix);
+        let worker = Worker::from_dense(matrix).unwrap();
 
         assert!(worker.work_rows[0].is_empty());
         assert_eq!(
@@ -325,7 +327,7 @@ mod tests {
     fn from_dense_drops_small_entries() {
         let matrix = array![[DROP_TOLERANCE / 2.0, 1.0]];
 
-        let worker = Worker::from_dense(matrix);
+        let worker = Worker::from_dense(matrix).unwrap();
 
         assert_eq!(
             worker.work_rows[0].iter().collect::<Vec<_>>(),
@@ -339,21 +341,41 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "number of rows must be positive")]
     fn from_coo_matrix_rejects_zero_rows() {
-        Worker::from_coo_matrix(0, 1, Vec::new().into_iter());
+        let error = Worker::from_coo_matrix(0, 1, Vec::new().into_iter()).err();
+
+        assert_eq!(error, Some(LuError::ZeroRows));
     }
 
     #[test]
-    #[should_panic(expected = "number of columns must be positive")]
     fn from_coo_matrix_rejects_zero_columns() {
-        Worker::from_coo_matrix(1, 0, Vec::new().into_iter());
+        let error = Worker::from_coo_matrix(1, 0, Vec::new().into_iter()).err();
+
+        assert_eq!(error, Some(LuError::ZeroColumns));
+    }
+
+    #[test]
+    fn from_coo_matrix_rejects_out_of_bounds_entry() {
+        let row_error = Worker::from_coo_matrix(2, 2, [(2, 0, 1.0)].into_iter()).err();
+        let column_error = Worker::from_coo_matrix(2, 2, [(0, 2, 1.0)].into_iter()).err();
+
+        assert_eq!(
+            row_error,
+            Some(LuError::EntryRowOutOfBounds { row: 2, nrows: 2 })
+        );
+        assert_eq!(
+            column_error,
+            Some(LuError::EntryColumnOutOfBounds {
+                column: 2,
+                ncols: 2
+            })
+        );
     }
 
     #[test]
     fn choose_pivot_prefers_minimum_markowitz_cost() {
         let matrix = array![[1.0, 1.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 1.0]];
-        let worker = Worker::from_dense(matrix);
+        let worker = Worker::from_dense(matrix).unwrap();
 
         assert_eq!(worker.choose_pivot(), Some((1, 0)));
     }
@@ -365,7 +387,7 @@ mod tests {
             [0.0, 3.0, 0.0, 0.0],
             [4.0, 0.0, 5.0, 0.0],
         ];
-        let lu = Worker::from_dense(matrix.clone()).factorize();
+        let lu = Worker::from_dense(matrix.clone()).unwrap().factorize();
 
         let reconstructed = lu.reconstruct();
 
@@ -380,7 +402,7 @@ mod tests {
             [3.0, 0.0, 4.0],
             [0.0, 5.0, 6.0],
         ];
-        let lu = Worker::from_dense(matrix.clone()).factorize();
+        let lu = Worker::from_dense(matrix.clone()).unwrap().factorize();
 
         let reconstructed = lu.reconstruct();
 
@@ -391,7 +413,7 @@ mod tests {
     fn from_dense_factorizes_dense_matrix() {
         let matrix = array![[2.0, 0.0, 1.0], [4.0, 3.0, 0.0], [0.0, 5.0, 6.0]];
 
-        let lu = LU::from_dense(matrix.clone());
+        let lu = LU::from_dense(matrix.clone()).unwrap();
         let reconstructed = lu.reconstruct();
 
         assert_abs_diff_eq!(reconstructed, matrix, epsilon = 1.0e-9);
